@@ -14,7 +14,7 @@ A Telegram bot that helps you say the right thing without escalating conversatio
 
 ### 1) Clone and install
 ```bash
-git clone <repository-url>
+git clone git@github.com:Justadudeinspace.git
 cd resolver
 chmod +x install_resolver.sh
 ./install_resolver.sh
