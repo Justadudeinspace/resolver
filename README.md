@@ -15,8 +15,9 @@ A Telegram bot that helps you say the right thing without escalating conversatio
 ### 1) Clone and install
 ```bash
 git clone <repository-url>
-cd the_resolver
-chmod +x run.sh
+cd resolver
+chmod +x install_resolver.sh
+./install_resolver.sh
 ```
 
 ### 2) Configure
@@ -27,7 +28,7 @@ cp .env.example .env
 
 ### 3) Run
 ```bash
-./run.sh
+./run_resolver.sh
 ```
 
 ## Termux Install (Android)
@@ -35,13 +36,14 @@ cp .env.example .env
 pkg install git
 chmod +x install_resolver.sh
 ./install_resolver.sh
+./run_resolver.sh
 ```
 
 ## Environment Variables
 - `BOT_TOKEN` - Telegram bot token from @BotFather
 - `USE_LLM` - `true` or `false` to enable OpenAI usage
 - `OPENAI_API_KEY` - Optional (only if using LLM)
-- `LLM_MODEL` - Model name (default: `gpt-4.1-mini`)
+- `LLM_MODEL` - Model name (default: `gpt-4o-mini`)
 - `LLM_TEMPERATURE` - Response creativity
 - `RATE_LIMIT_PER_USER` - Requests per minute
 - `MAX_INPUT_LENGTH` - Max characters in input
@@ -80,8 +82,9 @@ chmod +x install_resolver.sh
 ├── .gitignore
 ├── install_resolver.sh
 ├── LICENSE
+├── MVP_CHECKLIST.md
 ├── requirements.txt
-├── run.sh
+├── run_resolver.sh
 └── README.md
 ```
 

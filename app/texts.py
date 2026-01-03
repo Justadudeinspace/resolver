@@ -17,7 +17,7 @@ EMOJIS = {
 START_TEXT = (
     f"{EMOJIS['help']} <b>The Resolver</b>\n\n"
     "Say the right thing without escalating.\n\n"
-    "<i>Choose a goal, paste a message or describe the situation,\n"
+    "<i>Choose a goal, paste a message or describe the situation, "
     "and get clear response options.</i>"
 )
 
@@ -94,6 +94,10 @@ ERROR_MESSAGES = {
     "config_missing": (
         "⚠️ <b>Configuration missing</b>\n\n"
         "Please set BOT_TOKEN and INVOICE_SECRET in .env."
+    ),
+    "generic": (
+        "⚠️ <b>Something went wrong</b>\n\n"
+        "Please try again in a moment."
     ),
 }
 

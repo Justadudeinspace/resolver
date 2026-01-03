@@ -1,6 +1,7 @@
 import asyncio
 import logging
 from logging import Logger
+from pathlib import Path
 
 from aiogram import Bot, Dispatcher
 from aiogram.enums import ParseMode
@@ -25,11 +26,13 @@ def setup_logging() -> Logger:
         logger.addHandler(console_handler)
 
         try:
-            file_handler = logging.FileHandler("resolver.log")
+            log_dir = Path("logs")
+            log_dir.mkdir(parents=True, exist_ok=True)
+            file_handler = logging.FileHandler(log_dir / "resolver.log")
             file_handler.setFormatter(formatter)
             logger.addHandler(file_handler)
         except OSError:
-            logger.warning("Could not write resolver.log; continuing with console logging only")
+            logger.warning("Could not write logs/resolver.log; continuing with console logging only")
 
     return logging.getLogger(__name__)
 
@@ -43,7 +46,9 @@ async def main() -> None:
         return
 
     if not settings.invoice_secret or len(settings.invoice_secret) < 32:
-        logger.warning("INVOICE_SECRET is missing or too short; payments will be disabled.")
+        logger.error("INVOICE_SECRET is missing or too short; payments require a 32+ char secret.")
+        print(ERROR_MESSAGES["config_missing"])
+        return
 
     db = DB(settings.db_path)
     bot = Bot(token=settings.bot_token, parse_mode=ParseMode.HTML)
