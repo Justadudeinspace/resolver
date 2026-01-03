@@ -55,7 +55,7 @@ CREATE TABLE IF NOT EXISTS purchases (
 
 
 class DB:
-    def __init__(self, path: str = None):
+    def __init__(self, path: Optional[str] = None):
         self.path = path or settings.db_path
         self._initialized = False
 
@@ -76,6 +76,7 @@ class DB:
             conn.execute("PRAGMA journal_mode=WAL;")
             conn.execute("PRAGMA synchronous=NORMAL;")
             conn.execute("PRAGMA foreign_keys=ON;")
+            conn.execute("PRAGMA busy_timeout=30000;")
 
             conn.executescript(SCHEMA)
             conn.commit()
@@ -220,25 +221,18 @@ class DB:
 
             if transaction_id:
                 cursor = conn.execute(
-                    "SELECT id FROM purchases WHERE transaction_id = ?",
-                    (transaction_id,),
+                    "INSERT OR IGNORE INTO purchases (user_id, stars_amount, resolves_added, transaction_id) "
+                    "VALUES (?, ?, ?, ?)",
+                    (user_id, stars_amount, resolves_added, transaction_id),
                 )
-                if cursor.fetchone() is not None:
-                    logger.warning("Transaction %s already processed", transaction_id)
+                if cursor.rowcount == 0:
+                    logger.warning("Transaction already processed")
                     return False
 
             conn.execute(
                 "UPDATE users SET resolves_remaining = resolves_remaining + ? WHERE user_id = ?",
                 (resolves_added, user_id),
             )
-
-            if transaction_id:
-                conn.execute(
-                    """INSERT OR IGNORE INTO purchases
-                    (user_id, stars_amount, resolves_added, transaction_id)
-                    VALUES (?, ?, ?, ?)""",
-                    (user_id, stars_amount, resolves_added, transaction_id),
-                )
 
             return True
 
@@ -329,7 +323,9 @@ class DB:
                         created = datetime.fromisoformat(str(row["created_at"]).replace("Z", "+00:00"))
                         age_days = (datetime.utcnow() - created).days
                     except ValueError:
-                        logger.warning("Could not parse created_at for user %s: %s", user_id, row["created_at"])
+                        logger.warning(
+                            "Could not parse created_at for user %s", user_id
+                        )
 
             return {
                 "total_interactions": total,

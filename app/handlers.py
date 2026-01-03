@@ -27,6 +27,18 @@ logger = logging.getLogger(__name__)
 router = Router()
 
 
+def _fallback_notice() -> str:
+    return (
+        "\n\n⚠️ <b>AI mode is disabled.</b> "
+        "Replies are generated using safe fallback templates. "
+        "Set USE_LLM=true and OPENAI_API_KEY in .env to enable AI."
+    )
+
+
+def _maybe_add_fallback(text: str) -> str:
+    return text + _fallback_notice() if not settings.use_llm else text
+
+
 def kb_goals():
     b = InlineKeyboardBuilder()
 
@@ -54,9 +66,9 @@ def kb_after_result():
 
 def kb_pricing():
     b = InlineKeyboardBuilder()
-    b.button(text="⭐ 5 Stars — 1 Resolve", callback_data="buy:p1")
-    b.button(text="⭐ 20 Stars — 5 Resolves", callback_data="buy:p5")
-    b.button(text="⭐ 50 Stars — 15 Resolves", callback_data="buy:p15")
+    b.button(text="⭐ 5 Stars — 1 Resolve", callback_data="buy:starter")
+    b.button(text="⭐ 20 Stars — 5 Resolves", callback_data="buy:bundle")
+    b.button(text="⭐ 50 Stars — 15 Resolves", callback_data="buy:pro")
     b.button(text=f"{EMOJIS['back']} Back", callback_data="nav:goals")
     b.adjust(1, 1, 1, 1)
     return b.as_markup()
@@ -83,7 +95,7 @@ async def cmd_start(msg: Message, state: FSMContext, db: DB):
         last_name=msg.from_user.last_name,
     )
 
-    await msg.answer(START_TEXT, reply_markup=kb_goals())
+    await msg.answer(_maybe_add_fallback(START_TEXT), reply_markup=kb_goals())
     logger.info("User %s started the bot", msg.from_user.id)
 
 
@@ -101,7 +113,7 @@ async def cmd_pricing(msg: Message):
 
 @router.message(Command("help"))
 async def cmd_help(msg: Message):
-    await msg.answer(HELP_TEXT, reply_markup=kb_goals())
+    await msg.answer(_maybe_add_fallback(HELP_TEXT), reply_markup=kb_goals())
 
 
 @router.message(Command("account"))
@@ -142,7 +154,7 @@ async def nav_handler(cb: CallbackQuery, state: FSMContext, db: DB):
         if action == "pricing":
             await cb.message.edit_text(PRICING_TEXT, reply_markup=kb_pricing())
         elif action == "help":
-            await cb.message.edit_text(HELP_TEXT, reply_markup=kb_goals())
+            await cb.message.edit_text(_maybe_add_fallback(HELP_TEXT), reply_markup=kb_goals())
         elif action == "account":
             user_id = cb.from_user.id
             db.ensure_user(user_id)
@@ -161,7 +173,7 @@ async def nav_handler(cb: CallbackQuery, state: FSMContext, db: DB):
             await state.clear()
             await cb.message.edit_text("Choose a goal:", reply_markup=kb_goals())
     except TelegramBadRequest:
-        pass
+        await cb.message.answer("Choose a goal:", reply_markup=kb_goals())
 
     await cb.answer()
 
@@ -379,7 +391,7 @@ async def successful_payment(msg: Message, db: DB):
 
         plan = PLANS.get(data["plan"])
         if not plan:
-            logger.error("Unknown plan in payment: %s", data["plan"])
+            logger.error("Unknown plan in payment")
             await msg.answer("Payment processing error. Please contact support.")
             return
 
@@ -403,11 +415,12 @@ async def successful_payment(msg: Message, db: DB):
             reply_markup=kb_goals(),
         )
 
+        charge_id_suffix = transaction_id[-6:] if transaction_id else "unknown"
         logger.info(
-            "Payment processed: user=%s, stars=%s, resolves=%s",
+            "Payment processed: user=%s, plan=%s, charge_id_suffix=%s",
             msg.from_user.id,
-            plan.stars,
-            plan.resolves,
+            plan.id,
+            charge_id_suffix,
         )
     except Exception as exc:
         logger.error("Payment processing error: %s", exc)

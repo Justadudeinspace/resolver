@@ -1,9 +1,6 @@
-import base64
 import hashlib
 import hmac
-import json
 import logging
-import secrets
 import time
 from dataclasses import dataclass
 from typing import Dict, Any, Optional
@@ -13,6 +10,7 @@ from .config import settings
 logger = logging.getLogger(__name__)
 
 MIN_SECRET_LENGTH = 32
+PAYLOAD_TTL_SECONDS = 3600
 
 
 @dataclass(frozen=True)
@@ -24,129 +22,93 @@ class Plan:
 
 
 PLANS: Dict[str, Plan] = {
-    "p1": Plan(id="p1", name="1 Resolve", stars=5, resolves=1),
-    "p5": Plan(id="p5", name="5 Resolves", stars=20, resolves=5),
-    "p15": Plan(id="p15", name="15 Resolves", stars=50, resolves=15),
+    "starter": Plan(id="starter", name="Starter", stars=5, resolves=1),
+    "bundle": Plan(id="bundle", name="Bundle", stars=20, resolves=5),
+    "pro": Plan(id="pro", name="Pro", stars=50, resolves=15),
 }
-
-STARS_TO_PLAN_ID: Dict[int, str] = {plan.stars: plan_id for plan_id, plan in PLANS.items()}
 
 
 def _secret_ready() -> bool:
     return bool(settings.invoice_secret and len(settings.invoice_secret) >= MIN_SECRET_LENGTH)
 
 
-def _sign(msg: bytes) -> Optional[str]:
+def _sign(payload: str) -> Optional[str]:
     if not _secret_ready():
         logger.error("INVOICE_SECRET is missing or too short; payments disabled")
         return None
     key = settings.invoice_secret.encode("utf-8")
-    return hmac.new(key, msg, hashlib.sha256).hexdigest()
+    return hmac.new(key, payload.encode("utf-8"), hashlib.sha256).hexdigest()
 
 
-def _encode_data(data: Dict[str, Any]) -> bytes:
-    return json.dumps(data, separators=(",", ":"), sort_keys=True).encode("utf-8")
-
-
-def make_payload(user_id: int, plan_id: str) -> Optional[str]:
-    plan = PLANS.get(plan_id)
-    if not plan:
-        raise ValueError(f"Unknown plan ID: {plan_id}")
-
-    payload = {
-        "v": 1,
-        "uid": user_id,
-        "plan": plan.id,
-        "stars": plan.stars,
-        "res": plan.resolves,
-        "ts": int(time.time()),
-        "nonce": secrets.token_hex(8),
-    }
-    raw = _encode_data(payload)
-    sig = _sign(raw)
-    if not sig:
-        return None
-
-    pack = {"d": base64.urlsafe_b64encode(raw).decode("ascii"), "s": sig}
-    return json.dumps(pack, separators=(",", ":"))
-
-
-def verify_and_parse_payload(payload: str) -> Optional[Dict[str, Any]]:
-    try:
-        if not _secret_ready():
-            logger.error("INVOICE_SECRET missing; cannot verify payload")
-            return None
-
-        pack = json.loads(payload)
-        if "d" not in pack or "s" not in pack:
-            logger.warning("Invalid payload structure")
-            return None
-
-        raw = base64.urlsafe_b64decode(pack["d"].encode("ascii"))
-        sig = pack["s"]
-
-        expected = _sign(raw)
-        if not expected or not hmac.compare_digest(expected, sig):
-            logger.warning("Invalid payload signature")
-            return None
-
-        data = json.loads(raw.decode("utf-8"))
-        required_fields = ("v", "uid", "plan", "stars", "res", "ts", "nonce")
-        for field in required_fields:
-            if field not in data:
-                logger.warning("Missing required field: %s", field)
-                return None
-
-        plan = PLANS.get(data["plan"])
-        if not plan:
-            logger.warning("Unknown plan: %s", data["plan"])
-            return None
-
-        if int(data["stars"]) != plan.stars or int(data["res"]) != plan.resolves:
-            logger.warning("Plan data mismatch")
-            return None
-
-        timestamp = int(data.get("ts", 0))
-        if timestamp <= 0:
-            logger.warning("Invalid timestamp in payload")
-            return None
-
-        return data
-    except json.JSONDecodeError as exc:
-        logger.warning("JSON decode error: %s", exc)
-        return None
-    except (base64.binascii.Error, ValueError) as exc:
-        logger.warning("Payload decode error: %s", exc)
-        return None
-    except Exception as exc:
-        logger.error("Unexpected error verifying payload: %s", exc)
-        return None
-
-
-def get_plan_by_stars(stars: int) -> Optional[Plan]:
-    plan_id = STARS_TO_PLAN_ID.get(stars)
-    return PLANS.get(plan_id) if plan_id else None
-
-
-def create_invoice_payload(user_id: int, plan_id: str) -> Optional[str]:
+def create_invoice_payload(uid: int, plan_id: str) -> Optional[str]:
     if not _secret_ready():
         logger.error("INVOICE_SECRET must be at least %s characters", MIN_SECRET_LENGTH)
         return None
 
+    plan = PLANS.get(plan_id)
+    if not plan:
+        logger.error("Unknown plan ID: %s", plan_id)
+        return None
+
+    ts = int(time.time())
+    payload_base = f"uid={uid}|plan={plan_id}|ts={ts}"
+    sig = _sign(payload_base)
+    if not sig:
+        return None
+
+    return f"{payload_base}|sig={sig}"
+
+
+def verify_and_parse_payload(payload: str) -> Optional[Dict[str, Any]]:
+    if not _secret_ready():
+        logger.error("INVOICE_SECRET missing; cannot verify payload")
+        return None
+
     try:
-        return make_payload(user_id, plan_id)
-    except Exception as exc:
-        logger.error("Failed to create invoice payload: %s", exc)
+        parts = payload.split("|")
+        data: Dict[str, str] = {}
+        for part in parts:
+            if "=" not in part:
+                continue
+            key, value = part.split("=", 1)
+            data[key] = value
+
+        if not {"uid", "plan", "ts", "sig"}.issubset(data.keys()):
+            logger.warning("Invalid payload structure")
+            return None
+
+        uid = int(data["uid"])
+        plan_id = data["plan"]
+        timestamp = int(data["ts"])
+
+        if plan_id not in PLANS:
+            logger.warning("Unknown plan in payload")
+            return None
+
+        if timestamp <= 0 or (int(time.time()) - timestamp) > PAYLOAD_TTL_SECONDS:
+            logger.warning("Expired or invalid timestamp in payload")
+            return None
+
+        payload_base = f"uid={uid}|plan={plan_id}|ts={timestamp}"
+        expected = _sign(payload_base)
+        if not expected or not hmac.compare_digest(expected, data["sig"]):
+            logger.warning("Invalid payload signature")
+            return None
+
+        return {"uid": uid, "plan": plan_id, "ts": timestamp}
+    except (ValueError, TypeError) as exc:
+        logger.warning("Payload parse error: %s", exc)
         return None
 
 
-def verify_stars_payment(stars: int, payload: str) -> Optional[Dict[str, Any]]:
+def verify_stars_payment(total_stars: int, payload: str) -> Optional[Dict[str, Any]]:
     data = verify_and_parse_payload(payload)
     if not data:
         return None
 
-    if int(data["stars"]) != stars:
-        logger.warning("Stars amount mismatch: %s != %s", data["stars"], stars)
+    plan = PLANS.get(data["plan"])
+    if not plan or plan.stars != total_stars:
+        logger.warning("Stars amount mismatch")
         return None
 
     return data

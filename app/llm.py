@@ -50,6 +50,12 @@ SYSTEM_PROMPTS = {
     ),
 }
 
+MODIFIER_HINTS = {
+    "softer": "Make the responses more empathetic, gentle, and understanding.",
+    "firmer": "Make the responses more assertive, direct, and boundary-setting.",
+    "shorter": "Make the responses more concise and to-the-point.",
+}
+
 
 class LLMClient:
     def __init__(self) -> None:
@@ -90,19 +96,14 @@ class LLMClient:
             parsed = self._parse_responses_robust(content)
             return parsed
         except Exception as exc:
-            logger.error("LLM generation failed: %s", exc)
+            logger.warning("LLM generation failed; using fallback. Error: %s", exc)
             return self._generate_template_responses(goal, modifier)
 
     def _build_prompt(self, user_text: str, modifier: Optional[str] = None) -> str:
         prompt = f"Generate 3 response options for this situation:\n\n{user_text[:1000]}"
 
         if modifier:
-            modifier_instructions = {
-                "softer": "Make the responses more empathetic, gentle, and understanding.",
-                "firmer": "Make the responses more assertive, direct, and boundary-setting.",
-                "shorter": "Make the responses more concise and to-the-point (shorter).",
-            }
-            prompt += f"\n\nAdditional instruction: {modifier_instructions.get(modifier, modifier)}"
+            prompt += f"\n\nAdditional instruction: {MODIFIER_HINTS.get(modifier, modifier)}"
 
         return prompt
 

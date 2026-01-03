@@ -1,3 +1,8 @@
+# Environment files
+.env
+.env.*
+!.env.example
+
 # Python
 __pycache__/
 *.py[cod]
@@ -8,20 +13,36 @@ __pycache__/
 .venv/
 venv/
 
-# Environment files
-.env
-
 # Logs
+logs/
 *.log
-resolver.log
 
-# Data
+# Data / databases
 /data/
+*.sqlite
+*.sqlite3
+*.db
+*.journal
+*.wal
+*.shm
+
+# Cache
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
 
 # OS files
 .DS_Store
 Thumbs.db
 
-# SQLite
-*.sqlite3
-*.db
+# Build artifacts
+build/
+dist/
+*.egg-info/
+
+# Node
+node_modules/
+npm-debug.log*
+
+# Coverage
+coverage/
