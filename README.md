@@ -56,6 +56,20 @@ chmod +x install_resolver.sh
 - The bot uses `currency="XTR"` and an empty `provider_token`.
 - Credits are applied only after `successful_payment` validation.
 
+## Core Flow
+1) `/start` → choose a goal
+2) Send your text
+3) Receive 3 response options
+4) Use **Retry** modifiers (Softer / Firmer / Shorter)
+
+## Rules
+- **Free tier**: 1 Stabilize resolve per day.
+- **Retry rule**: One free retry after a paid resolve; additional retries consume paid resolves.
+- **Stars plans**:
+  - Starter: 5 ⭐ = 1 resolve
+  - Bundle: 20 ⭐ = 5 resolves
+  - Pro: 50 ⭐ = 15 resolves
+
 ## Commands
 - `/start` - Start the bot
 - `/resolve` - Start a new resolution

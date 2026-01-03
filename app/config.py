@@ -12,9 +12,9 @@ class Settings(BaseSettings):
     db_path: str = Field(default="./data/resolver.sqlite3", alias="DB_PATH")
 
     # LLM (optional)
-    use_llm_env: bool = Field(default=True, alias="USE_LLM")
+    use_llm_env: bool = Field(default=False, alias="USE_LLM")
     openai_api_key: Optional[str] = Field(default=None, alias="OPENAI_API_KEY")
-    llm_model: str = Field(default="gpt-4.1-mini", alias="LLM_MODEL")
+    llm_model: str = Field(default="gpt-4o-mini", alias="LLM_MODEL")
     llm_temperature: float = Field(default=0.4, alias="LLM_TEMPERATURE")
 
     # Rate limiting
@@ -45,6 +45,13 @@ class Settings(BaseSettings):
             )
             return "INFO"
         return level
+
+    @field_validator("invoice_secret")
+    @classmethod
+    def validate_invoice_secret(cls, value: str) -> str:
+        if not value or len(value) < 32:
+            raise ValueError("INVOICE_SECRET must be at least 32 characters long.")
+        return value
 
     @property
     def use_llm(self) -> bool:

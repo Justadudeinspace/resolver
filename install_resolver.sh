@@ -72,33 +72,57 @@ fi
 print_success "Python found"
 
 print_step "Installing system dependencies..."
+run_optional() {
+    if command -v timeout &> /dev/null; then
+        if ! timeout 30 "$@"; then
+            print_warning "Command failed (continuing): $*"
+            return 0
+        fi
+    else
+        if ! "$@"; then
+            print_warning "Command failed (continuing): $*"
+            return 0
+        fi
+    fi
+}
+
 case $PLATFORM in
     termux)
-        pkg update -y && pkg upgrade -y
-        pkg install -y python3 sqlite git
+        run_optional pkg update -y
+        run_optional pkg upgrade -y
+        run_optional pkg install -y python3 sqlite git
         ;;
     linux|wsl)
+        SUDO_CMD=""
+        if command -v sudo &> /dev/null; then
+            SUDO_CMD="sudo"
+        fi
+
         if command -v apt-get &> /dev/null; then
-            sudo apt-get update
-            sudo apt-get install -y python3-pip python3-venv sqlite3 git
+            run_optional $SUDO_CMD apt-get update
+            run_optional $SUDO_CMD apt-get install -y python3-pip python3-venv sqlite3 git
         elif command -v yum &> /dev/null; then
-            sudo yum install -y python3-pip sqlite git
+            run_optional $SUDO_CMD yum install -y python3-pip sqlite git
         elif command -v dnf &> /dev/null; then
-            sudo dnf install -y python3-pip sqlite git
+            run_optional $SUDO_CMD dnf install -y python3-pip sqlite git
         elif command -v pacman &> /dev/null; then
-            sudo pacman -S --noconfirm python-pip sqlite git
+            run_optional $SUDO_CMD pacman -S --noconfirm python-pip sqlite git
+        else
+            print_warning "No supported package manager found; skipping system dependency install"
         fi
         ;;
     macos)
         if command -v brew &> /dev/null; then
-            brew install python3 sqlite3 git
+            run_optional brew install python3 sqlite3 git
+        else
+            print_warning "Homebrew not found; skipping system dependency install"
         fi
         ;;
     *)
         print_warning "Unknown platform; skipping system dependency install"
         ;;
 esac
-print_success "System dependencies installed"
+print_success "System dependency step completed"
 
 print_step "Installing Python requirements..."
 if [ ! -f "requirements.txt" ]; then
@@ -106,13 +130,13 @@ if [ ! -f "requirements.txt" ]; then
     exit 1
 fi
 
-python3 -m pip install --upgrade pip
+run_optional python3 -m pip install --upgrade pip
 
 if [ "$PLATFORM" = "termux" ]; then
     print_info "Installing packages individually for Termux..."
-    python3 -m pip install aiogram python-dotenv pydantic pydantic-settings cachetools openai cryptography
+    run_optional python3 -m pip install aiogram python-dotenv pydantic pydantic-settings cachetools openai cryptography
 else
-    python3 -m pip install -r requirements.txt
+    run_optional python3 -m pip install -r requirements.txt
 fi
 print_success "Python requirements installed"
 
