@@ -415,12 +415,12 @@ async def successful_payment(msg: Message, db: DB):
             reply_markup=kb_goals(),
         )
 
-        charge_id_suffix = transaction_id[-6:] if transaction_id else "unknown"
+        charge_id_prefix = transaction_id[:6] if transaction_id else "unknown"
         logger.info(
-            "Payment processed: user=%s, plan=%s, charge_id_suffix=%s",
+            "Payment processed: user=%s, plan=%s, charge_id_prefix=%s",
             msg.from_user.id,
             plan.id,
-            charge_id_suffix,
+            charge_id_prefix,
         )
     except Exception as exc:
         logger.error("Payment processing error: %s", exc)

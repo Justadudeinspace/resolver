@@ -1,6 +1,7 @@
 import hashlib
 import hmac
 import logging
+import secrets
 import time
 from dataclasses import dataclass
 from typing import Dict, Any, Optional
@@ -40,6 +41,10 @@ def _sign(payload: str) -> Optional[str]:
     return hmac.new(key, payload.encode("utf-8"), hashlib.sha256).hexdigest()
 
 
+def _build_payload_base(uid: int, plan_id: str, timestamp: int, nonce: str) -> str:
+    return f"uid={uid}|plan={plan_id}|ts={timestamp}|nonce={nonce}"
+
+
 def create_invoice_payload(uid: int, plan_id: str) -> Optional[str]:
     if not _secret_ready():
         logger.error("INVOICE_SECRET must be at least %s characters", MIN_SECRET_LENGTH)
@@ -51,7 +56,8 @@ def create_invoice_payload(uid: int, plan_id: str) -> Optional[str]:
         return None
 
     ts = int(time.time())
-    payload_base = f"uid={uid}|plan={plan_id}|ts={ts}"
+    nonce = secrets.token_hex(8)
+    payload_base = _build_payload_base(uid, plan_id, ts, nonce)
     sig = _sign(payload_base)
     if not sig:
         return None
@@ -73,23 +79,29 @@ def verify_and_parse_payload(payload: str) -> Optional[Dict[str, Any]]:
             key, value = part.split("=", 1)
             data[key] = value
 
-        if not {"uid", "plan", "ts", "sig"}.issubset(data.keys()):
+        if not {"uid", "plan", "ts", "nonce", "sig"}.issubset(data.keys()):
             logger.warning("Invalid payload structure")
             return None
 
         uid = int(data["uid"])
         plan_id = data["plan"]
         timestamp = int(data["ts"])
+        nonce = data["nonce"]
 
         if plan_id not in PLANS:
             logger.warning("Unknown plan in payload")
             return None
 
-        if timestamp <= 0 or (int(time.time()) - timestamp) > PAYLOAD_TTL_SECONDS:
+        now = int(time.time())
+        if timestamp <= 0 or timestamp > now + 60 or (now - timestamp) > PAYLOAD_TTL_SECONDS:
             logger.warning("Expired or invalid timestamp in payload")
             return None
 
-        payload_base = f"uid={uid}|plan={plan_id}|ts={timestamp}"
+        if not nonce:
+            logger.warning("Missing nonce in payload")
+            return None
+
+        payload_base = _build_payload_base(uid, plan_id, timestamp, nonce)
         expected = _sign(payload_base)
         if not expected or not hmac.compare_digest(expected, data["sig"]):
             logger.warning("Invalid payload signature")

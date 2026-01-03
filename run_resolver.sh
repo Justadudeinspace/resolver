@@ -23,6 +23,14 @@ print_error() {
     echo -e "${RED}[ERROR]${NC} $1"
 }
 
+run_with_timeout() {
+    if command -v timeout &> /dev/null; then
+        timeout 60 "$@"
+    else
+        "$@"
+    fi
+}
+
 # Check if we're in the correct directory
 if [ ! -f "app/main.py" ]; then
     print_error "Could not find app/main.py"
@@ -89,8 +97,17 @@ fi
 if ! $PYTHON_BIN -c "import aiogram, pydantic, pydantic_settings, cachetools, openai, cryptography" &> /dev/null; then
     print_warning "Some dependencies missing"
     print_info "Installing dependencies..."
-    $PYTHON_BIN -m pip install --upgrade pip
-    $PYTHON_BIN -m pip install -r requirements.txt
+    if ! run_with_timeout $PYTHON_BIN -m pip install --upgrade pip; then
+        print_warning "Pip upgrade failed; continuing"
+    fi
+    if ! run_with_timeout $PYTHON_BIN -m pip install -r requirements.txt; then
+        print_warning "Dependency install failed; retry with network access"
+    fi
+
+    if ! $PYTHON_BIN -c "import aiogram, pydantic, pydantic_settings, cachetools, openai, cryptography" &> /dev/null; then
+        print_error "Missing dependencies; please install requirements.txt and re-run."
+        exit 1
+    fi
 fi
 
 # Run database health check
