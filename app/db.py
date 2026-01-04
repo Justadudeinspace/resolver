@@ -20,6 +20,8 @@ CREATE TABLE IF NOT EXISTS users (
     free_used_date TEXT,
     current_goal TEXT,
     last_input_text TEXT,
+    default_goal TEXT,
+    default_style TEXT,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
@@ -51,6 +53,14 @@ CREATE TABLE IF NOT EXISTS purchases (
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY(user_id) REFERENCES users(user_id)
 );
+
+CREATE TABLE IF NOT EXISTS feedback (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL,
+    message TEXT NOT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY(user_id) REFERENCES users(user_id)
+);
 """
 
 
@@ -79,6 +89,7 @@ class DB:
             conn.execute("PRAGMA busy_timeout=30000;")
 
             conn.executescript(SCHEMA)
+            self._ensure_user_columns(conn)
             conn.commit()
             self._initialized = True
             logger.info("Database initialized with WAL mode")
@@ -87,6 +98,18 @@ class DB:
             raise
         finally:
             conn.close()
+
+    def _ensure_user_columns(self, conn: sqlite3.Connection) -> None:
+        cursor = conn.execute("PRAGMA table_info(users)")
+        existing = {row[1] for row in cursor.fetchall()}
+        missing_columns = {
+            "default_goal": "TEXT",
+            "default_style": "TEXT",
+        }
+        for column, column_type in missing_columns.items():
+            if column not in existing:
+                conn.execute(f"ALTER TABLE users ADD COLUMN {column} {column_type}")
+                logger.info("Added missing column to users: %s", column)
 
     @contextmanager
     def _conn(self):
@@ -181,6 +204,33 @@ class DB:
             conn.execute(
                 "UPDATE users SET last_input_text = ? WHERE user_id = ?",
                 (text, user_id),
+            )
+
+    def set_default_goal(self, user_id: int, goal: Optional[str]) -> None:
+        """Set or clear the default goal for a user"""
+        with self._conn() as conn:
+            self._ensure_user_conn(conn, user_id)
+            conn.execute(
+                "UPDATE users SET default_goal = ? WHERE user_id = ?",
+                (goal, user_id),
+            )
+
+    def set_default_style(self, user_id: int, style: Optional[str]) -> None:
+        """Set or clear the default style for a user"""
+        with self._conn() as conn:
+            self._ensure_user_conn(conn, user_id)
+            conn.execute(
+                "UPDATE users SET default_style = ? WHERE user_id = ?",
+                (style, user_id),
+            )
+
+    def add_feedback(self, user_id: int, message: str) -> None:
+        """Record user feedback"""
+        with self._conn() as conn:
+            self._ensure_user_conn(conn, user_id)
+            conn.execute(
+                "INSERT INTO feedback (user_id, message) VALUES (?, ?)",
+                (user_id, message),
             )
 
     def get_retry_flags(self, user_id: int) -> Dict[str, bool]:
@@ -339,11 +389,11 @@ class DB:
         try:
             with self._conn() as conn:
                 cursor = conn.execute(
-                    "SELECT name FROM sqlite_master WHERE type='table' AND name IN (?, ?, ?, ?)",
-                    ("users", "retry_flags", "interactions", "purchases"),
+                    "SELECT name FROM sqlite_master WHERE type='table' AND name IN (?, ?, ?, ?, ?)",
+                    ("users", "retry_flags", "interactions", "purchases", "feedback"),
                 )
                 tables_found = {row["name"] for row in cursor.fetchall()}
-                return len(tables_found) == 4
+                return len(tables_found) == 5
         except Exception as exc:
             logger.error("Database health check failed: %s", exc)
             return False
