@@ -46,6 +46,15 @@ class Settings(BaseSettings):
             return "INFO"
         return level
 
+    @field_validator("bot_token")
+    @classmethod
+    def validate_bot_token(cls, value: str) -> str:
+        if not value or "your_token_here" in value:
+            raise ValueError(
+                "BOT_TOKEN is missing or still a placeholder. Edit .env and set BOT_TOKEN."
+            )
+        return value
+
     @field_validator("invoice_secret")
     @classmethod
     def validate_invoice_secret(cls, value: str) -> str:

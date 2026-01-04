@@ -23,6 +23,29 @@ print_error() {
     echo -e "${RED}[ERROR]${NC} $1"
 }
 
+read_env_value() {
+    local key="$1"
+    local value=""
+    if [ ! -f ".env" ]; then
+        return 1
+    fi
+    while IFS= read -r line || [ -n "$line" ]; do
+        case "$line" in
+            ""|\#*) continue ;;
+        esac
+        if [[ "$line" == "$key="* ]]; then
+            value="${line#*=}"
+            value="${value%\"}"
+            value="${value#\"}"
+            value="${value%\'}"
+            value="${value#\'}"
+            printf "%s" "$value"
+            return 0
+        fi
+    done < ".env"
+    return 1
+}
+
 run_with_timeout() {
     if command -v timeout &> /dev/null; then
         timeout 60 "$@"
@@ -44,12 +67,19 @@ if [ ! -f ".env" ]; then
     if [ -f ".env.example" ]; then
         cp .env.example .env
         print_info "Created .env from .env.example"
-        print_info "Please edit .env with your credentials, then re-run ./run_resolver.sh"
+        print_info "Edit .env and set BOT_TOKEN, then re-run ./run_resolver.sh"
         exit 1
     else
         print_error "No .env.example file found"
         exit 1
     fi
+fi
+
+BOT_TOKEN="$(read_env_value "BOT_TOKEN" || true)"
+if [ -z "$BOT_TOKEN" ] || [[ "$BOT_TOKEN" == *"your_token_here"* ]]; then
+    print_error "BOT_TOKEN is missing or still a placeholder."
+    print_info "Edit .env and set BOT_TOKEN to your Telegram bot token, then re-run ./run_resolver.sh"
+    exit 1
 fi
 
 # Detect Termux
@@ -80,6 +110,15 @@ print_info "Python version: $PYTHON_VERSION"
 # Ensure directories exist
 mkdir -p data logs
 
+DB_PATH="$(read_env_value "DB_PATH" || true)"
+if [ -z "$DB_PATH" ]; then
+    DB_PATH="./data/resolver.sqlite3"
+fi
+DB_DIR="$(dirname "$DB_PATH")"
+if [ -n "$DB_DIR" ]; then
+    mkdir -p "$DB_DIR"
+fi
+
 # Setup virtual environment on non-Termux
 if [ "$IS_TERMUX" = false ]; then
     if [ ! -d ".venv" ]; then
@@ -108,6 +147,13 @@ if ! $PYTHON_BIN -c "import aiogram, pydantic, pydantic_settings, cachetools, op
         print_error "Missing dependencies; please install requirements.txt and re-run."
         exit 1
     fi
+fi
+
+# Run compileall to validate imports and syntax
+print_info "Running compileall..."
+if ! $PYTHON_BIN -m compileall app; then
+    print_error "Compileall failed"
+    exit 1
 fi
 
 # Run database health check
