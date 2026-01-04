@@ -58,8 +58,11 @@ class Settings(BaseSettings):
     @field_validator("invoice_secret")
     @classmethod
     def validate_invoice_secret(cls, value: str) -> str:
-        if not value or len(value) < 32:
-            raise ValueError("INVOICE_SECRET must be at least 32 characters long.")
+        placeholder_markers = ("CHANGE_ME", "generate_a_secure_random_string_here")
+        if not value or len(value) < 32 or any(marker in value for marker in placeholder_markers):
+            raise ValueError(
+                "INVOICE_SECRET must be at least 32 characters long and not a placeholder."
+            )
         return value
 
     @property

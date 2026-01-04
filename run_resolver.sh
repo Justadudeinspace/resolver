@@ -82,6 +82,15 @@ if [ -z "$BOT_TOKEN" ] || [[ "$BOT_TOKEN" == *"your_token_here"* ]]; then
     exit 1
 fi
 
+INVOICE_SECRET="$(read_env_value "INVOICE_SECRET" || true)"
+if [ -z "$INVOICE_SECRET" ] || [ "${#INVOICE_SECRET}" -lt 32 ] \
+    || [[ "$INVOICE_SECRET" == *"CHANGE_ME"* ]] \
+    || [[ "$INVOICE_SECRET" == *"generate_a_secure_random_string_here"* ]]; then
+    print_error "INVOICE_SECRET is missing, too short, or still a placeholder."
+    print_info "Edit .env and set INVOICE_SECRET to a 32+ character random string, then re-run ./run_resolver.sh"
+    exit 1
+fi
+
 # Detect Termux
 IS_TERMUX=false
 if [ -f /system/build.prop ] && [ -d /data/data/com.termux/files/usr ]; then
