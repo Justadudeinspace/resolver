@@ -54,7 +54,7 @@ chmod +x install_resolver.sh
 ## Telegram Stars Notes
 - Stars invoices require enabling **Stars** monetization in @BotFather.
 - The bot uses `currency="XTR"` and an empty `provider_token`.
-- Credits are applied only after `successful_payment` validation.
+- Buttons open Telegram Stars invoices, and resolves are added only after `successful_payment` validation.
 
 ## Core Flow
 1) `/start` → choose a goal
@@ -63,9 +63,9 @@ chmod +x install_resolver.sh
 4) Use **Retry** modifiers (Softer / Firmer / Shorter)
 
 ## Defaults (Settings)
-- Use `/settings` to set a **default goal** and **default style**.
-- If a default goal is set, `/resolve` auto-selects it and prompts for text (use **Change goal** to switch).
-- Default style is applied to the first response set unless you choose a retry modifier.
+- Use `/settings` to set a **default goal** and **default tone**.
+- If a default goal is set, `/resolve` auto-selects it and prompts for text (tap another goal to switch).
+- Default tone is applied to the first response set unless you choose a retry modifier.
 
 ## Rules
 - **Free tier**: 1 Stabilize resolve per day.

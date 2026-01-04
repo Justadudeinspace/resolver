@@ -39,6 +39,13 @@ STYLE_OPTIONS = {
 }
 
 
+async def _edit_or_send(message: Message, text: str, reply_markup=None) -> None:
+    try:
+        await message.edit_text(text, reply_markup=reply_markup)
+    except TelegramBadRequest:
+        await message.answer(text, reply_markup=reply_markup)
+
+
 def _fallback_notice() -> str:
     return (
         "\n\n⚠️ <b>AI mode is disabled.</b> "
@@ -64,8 +71,15 @@ def kb_goals():
     b.button(text=f"{EMOJIS['account']} Account", callback_data="nav:account")
     b.button(text=f"{EMOJIS['settings']} Settings", callback_data="nav:settings")
     b.button(text=f"{EMOJIS['help']} Help", callback_data="nav:help")
-    b.button(text=f"{EMOJIS['feedback']} Feedback", callback_data="feedback:start")
+    b.button(text=f"{EMOJIS['feedback']} Send feedback", callback_data="feedback:start")
     b.adjust(3, 3, 2)
+    return b.as_markup()
+
+
+def kb_back_main():
+    b = InlineKeyboardBuilder()
+    b.button(text=f"{EMOJIS['back']} Back to main menu", callback_data="nav:goals")
+    b.adjust(1)
     return b.as_markup()
 
 
@@ -96,6 +110,7 @@ def kb_retry_menu():
     b.button(text="Cancel", callback_data="nav:goals")
     b.adjust(3, 1)
     return b.as_markup()
+
 
 def kb_settings():
     b = InlineKeyboardBuilder()
@@ -173,11 +188,11 @@ async def cmd_resolve(msg: Message, state: FSMContext, db: DB):
         await state.set_state(Flow.waiting_for_text)
         style_line = ""
         if default_style in STYLE_OPTIONS:
-            style_line = f"\nDefault style: {STYLE_OPTIONS[default_style]}"
+            style_line = f"\nDefault tone: {STYLE_OPTIONS[default_style]}"
         await msg.answer(
             f"Default goal: {GOAL_DESCRIPTIONS[default_goal]['name']}{style_line}\n\n"
             f"{GOAL_PROMPTS[default_goal]}",
-            reply_markup=kb_change_goal(),
+            reply_markup=kb_goals(),
         )
     else:
         await msg.answer("Choose a goal:", reply_markup=kb_goals())
@@ -228,7 +243,7 @@ async def cmd_buy(msg: Message, command: CommandObject, bot: Bot):
 
 @router.message(Command("help"))
 async def cmd_help(msg: Message):
-    await msg.answer(_maybe_add_fallback(HELP_TEXT), reply_markup=kb_goals())
+    await msg.answer(_maybe_add_fallback(HELP_TEXT), reply_markup=kb_back_main())
 
 
 @router.message(Command("account"))
@@ -248,7 +263,7 @@ async def cmd_account(msg: Message, db: DB):
         account_age=stats.get("account_age_days", 0),
     )
 
-    await msg.answer(text, reply_markup=kb_goals())
+    await msg.answer(text, reply_markup=kb_back_main())
 
 
 @router.message(Command("settings"))
@@ -273,17 +288,14 @@ async def cmd_feedback(msg: Message, command: CommandObject, state: FSMContext, 
         logger.debug("Feedback detail from user %s: %s", msg.from_user.id, feedback)
         await msg.answer(FEEDBACK_THANKS, reply_markup=kb_goals())
     else:
-        await msg.answer(FEEDBACK_PROMPT, reply_markup=kb_goals())
+        await msg.answer(FEEDBACK_PROMPT, reply_markup=kb_back_main())
         await state.set_state(Flow.waiting_for_feedback)
 
 
 @router.callback_query(F.data == "feedback:start")
 async def feedback_start_handler(cb: CallbackQuery, state: FSMContext):
     await state.clear()
-    try:
-        await cb.message.edit_text(FEEDBACK_PROMPT, reply_markup=kb_goals())
-    except TelegramBadRequest:
-        await cb.message.answer(FEEDBACK_PROMPT, reply_markup=kb_goals())
+    await _edit_or_send(cb.message, FEEDBACK_PROMPT, reply_markup=kb_back_main())
     await state.set_state(Flow.waiting_for_feedback)
     await cb.answer()
 
@@ -293,35 +305,32 @@ async def nav_handler(cb: CallbackQuery, state: FSMContext, db: DB):
     action = cb.data.split(":", 1)[1]
     await state.clear()
 
-    try:
-        if action == "pricing":
-            await cb.message.edit_text(PRICING_TEXT, reply_markup=kb_pricing())
-        elif action == "help":
-            await cb.message.edit_text(_maybe_add_fallback(HELP_TEXT), reply_markup=kb_goals())
-        elif action == "settings":
-            user_id = cb.from_user.id
-            db.ensure_user(user_id)
-            user = db.get_user(user_id)
-            await cb.message.edit_text(render_settings_text(user), reply_markup=kb_settings())
-        elif action == "account":
-            user_id = cb.from_user.id
-            db.ensure_user(user_id)
-            user = db.get_user(user_id)
-            stats = db.get_user_stats(user_id)
-            free_status = "Available" if db.can_use_free_today(user_id) else "Used today"
+    if action == "pricing":
+        await _edit_or_send(cb.message, PRICING_TEXT, reply_markup=kb_pricing())
+    elif action == "help":
+        await _edit_or_send(cb.message, _maybe_add_fallback(HELP_TEXT), reply_markup=kb_back_main())
+    elif action == "settings":
+        user_id = cb.from_user.id
+        db.ensure_user(user_id)
+        user = db.get_user(user_id)
+        await _edit_or_send(cb.message, render_settings_text(user), reply_markup=kb_settings())
+    elif action == "account":
+        user_id = cb.from_user.id
+        db.ensure_user(user_id)
+        user = db.get_user(user_id)
+        stats = db.get_user_stats(user_id)
+        free_status = "Available" if db.can_use_free_today(user_id) else "Used today"
 
-            text = ACCOUNT_TEMPLATE.format(
-                paid_resolves=user.get("resolves_remaining", 0),
-                free_status=free_status,
-                total_uses=stats.get("total_interactions", 0),
-                account_age=stats.get("account_age_days", 0),
-            )
-            await cb.message.edit_text(text, reply_markup=kb_goals())
-        else:
-            await state.clear()
-            await cb.message.edit_text("Choose a goal:", reply_markup=kb_goals())
-    except TelegramBadRequest:
-        await cb.message.answer("Choose a goal:", reply_markup=kb_goals())
+        text = ACCOUNT_TEMPLATE.format(
+            paid_resolves=user.get("resolves_remaining", 0),
+            free_status=free_status,
+            total_uses=stats.get("total_interactions", 0),
+            account_age=stats.get("account_age_days", 0),
+        )
+        await _edit_or_send(cb.message, text, reply_markup=kb_back_main())
+    else:
+        await state.clear()
+        await _edit_or_send(cb.message, "Choose a goal:", reply_markup=kb_goals())
 
     await cb.answer()
 
@@ -336,10 +345,7 @@ async def choose_goal(cb: CallbackQuery, state: FSMContext, db: DB):
     db.set_retry_flags(user_id, last_paid=False, free_retry=False)
 
     await state.set_state(Flow.waiting_for_text)
-    try:
-        await cb.message.edit_text(GOAL_PROMPTS[goal])
-    except TelegramBadRequest:
-        await cb.message.answer(GOAL_PROMPTS[goal])
+    await _edit_or_send(cb.message, GOAL_PROMPTS[goal], reply_markup=kb_back_main())
     await cb.answer()
 
 
@@ -366,10 +372,7 @@ async def settings_handler(cb: CallbackQuery, db: DB):
         return
 
     user = db.get_user(user_id)
-    try:
-        await cb.message.edit_text(render_settings_text(user), reply_markup=kb_settings())
-    except TelegramBadRequest:
-        await cb.message.answer(render_settings_text(user), reply_markup=kb_settings())
+    await _edit_or_send(cb.message, render_settings_text(user), reply_markup=kb_settings())
     await cb.answer("Settings saved.")
 
 

@@ -1,3 +1,4 @@
+import html
 from typing import Dict
 
 EMOJIS = {
@@ -55,27 +56,33 @@ PRICING_TEXT = (
     "⭐ <b>5 Stars</b> → 1 Resolve\n"
     "⭐ <b>20 Stars</b> → 5 Resolves\n"
     "⭐ <b>50 Stars</b> → 15 Resolves\n\n"
-    "<i>Pay with Telegram Stars. Keep a small bundle so you're not stuck mid-conversation.</i>"
+    "<i>Pay with Telegram Stars. Tap a plan to open a Stars invoice.</i>\n"
+    "<i>Resolves are added only after successful payment.</i>"
 )
 
 HELP_TEXT = (
-    f"{EMOJIS['help']} <b>Help Guide</b>\n\n"
-    "<b>How it works:</b>\n"
-    "1) Choose a goal: Stabilize / Clarify / Close\n"
+    f"{EMOJIS['help']} <b>Help</b>\n\n"
+    "<b>Resolve flow:</b>\n"
+    "1) /resolve or choose a goal\n"
     "2) Paste the message or describe the situation\n"
     "3) Pick one of the response options\n\n"
-    "<b>Free tier:</b>\n"
-    f"{EMOJIS['free']} 1 Stabilize resolve per day\n\n"
-    "<b>Paid tier:</b>\n"
-    f"{EMOJIS['paid']} All goals + retries\n\n"
-    "<b>Extras:</b>\n"
-    "/settings to set defaults, /buy for Stars bundles"
+    "<b>Commands:</b>\n"
+    "/start — main menu\n"
+    "/resolve — choose a goal and resolve\n"
+    "/pricing — view Stars plans\n"
+    "/buy — purchase a plan\n"
+    "/account — usage and resolves\n"
+    "/settings — default goal & tone\n"
+    "/help — this screen\n"
+    "/feedback — send feedback\n\n"
+    "<b>Payments:</b>\n"
+    "Plans use Telegram Stars (XTR). Resolves are added after successful payment."
 )
 
 ACCOUNT_TEMPLATE = (
     f"{EMOJIS['account']} <b>Your Account</b>\n\n"
     "⭐ <b>Paid resolves remaining:</b> {paid_resolves}\n"
-    "🎁 <b>Free resolve today:</b> {free_status}\n"
+    "🎁 <b>Free stabilize today:</b> {free_status}\n"
     "📊 <b>Total uses:</b> {total_uses}\n"
     "🗓️ <b>Account age:</b> {account_age} days"
 )
@@ -83,8 +90,8 @@ ACCOUNT_TEMPLATE = (
 ERROR_MESSAGES = {
     "no_resolves": (
         f"{EMOJIS['buy']} <b>Out of Resolves</b>\n\n"
-        "You've used all your available resolves.\n"
-        "Grab a small bundle so you're not stuck mid-conversation."
+        "You've used all available resolves.\n"
+        "Open /pricing to grab a Stars bundle."
     ),
     "invalid_input": (
         "✍️ <b>Input too long</b>\n\n"
@@ -121,7 +128,7 @@ SETTINGS_TEXT = (
     "Set what I preselect for you. You can change this anytime.\n\n"
 )
 
-SETTINGS_STATUS = "Default goal: {default_goal}\nDefault style: {default_style}\n"
+SETTINGS_STATUS = "Default goal: {default_goal}\nDefault tone: {default_style}\n"
 
 FEEDBACK_PROMPT = (
     f"{EMOJIS['feedback']} <b>Feedback</b>\n\n"
@@ -132,10 +139,13 @@ FEEDBACK_THANKS = "Thank you for your feedback! 🙏"
 
 
 def render_options(a: str, b: str, c: str) -> str:
+    safe_a = html.escape(a, quote=False)
+    safe_b = html.escape(b, quote=False)
+    safe_c = html.escape(c, quote=False)
     return (
         "🧠 <b>Response Options</b>\n\n"
-        f"<b>A.</b> {a}\n\n"
-        f"<b>B.</b> {b}\n\n"
-        f"<b>C.</b> {c}\n\n"
+        f"<b>A.</b> {safe_a}\n\n"
+        f"<b>B.</b> {safe_b}\n\n"
+        f"<b>C.</b> {safe_c}\n\n"
         "<i>Pick the one that feels right for your situation.</i>"
     )
