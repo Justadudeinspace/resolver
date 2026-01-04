@@ -6,6 +6,10 @@
 
 A Telegram bot that helps you say the right thing without escalating conversations.
 
+<p align="center">
+  <img src="docs/assets/resolver_welcome.png" alt="The Resolver Welcome" width="420">
+</p>
+
 ## Features
 - **Stabilize**: Calm, grounded responses to reduce tension
 - **Clarify**: Firm, respectful responses that set clear boundaries
