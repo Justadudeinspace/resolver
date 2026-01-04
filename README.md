@@ -62,6 +62,11 @@ chmod +x install_resolver.sh
 3) Receive 3 response options
 4) Use **Retry** modifiers (Softer / Firmer / Shorter)
 
+## Defaults (Settings)
+- Use `/settings` to set a **default goal** and **default style**.
+- If a default goal is set, `/resolve` auto-selects it and prompts for text (use **Change goal** to switch).
+- Default style is applied to the first response set unless you choose a retry modifier.
+
 ## Rules
 - **Free tier**: 1 Stabilize resolve per day.
 - **Retry rule**: One free retry after a paid resolve; additional retries consume paid resolves.
@@ -79,6 +84,18 @@ chmod +x install_resolver.sh
 - `/settings` - Set your default goal and response style.
 - `/help` - Learn how to use The Resolver.
 - `/feedback` - Send feedback to improve the bot.
+
+## BotFather commands
+```
+/start
+/resolve
+/pricing
+/buy
+/account
+/settings
+/help
+/feedback
+```
 
 ## File Structure
 ```
@@ -109,6 +126,10 @@ chmod +x install_resolver.sh
 python -m app.main
 python -m compileall app
 ```
+
+## Changelog
+- Added settings defaults for goal/style and applied them to `/resolve` with a Change goal option.
+- Added a feedback submenu and database logging for feedback messages.
 
 ## License
 Proprietary - All rights reserved.

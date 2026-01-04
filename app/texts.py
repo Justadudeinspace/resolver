@@ -13,6 +13,7 @@ EMOJIS = {
     "buy": "🛒",
     "account": "👤",
     "settings": "⚙️",
+    "feedback": "✉️",
 }
 
 START_TEXT = (
@@ -54,7 +55,7 @@ PRICING_TEXT = (
     "⭐ <b>5 Stars</b> → 1 Resolve\n"
     "⭐ <b>20 Stars</b> → 5 Resolves\n"
     "⭐ <b>50 Stars</b> → 15 Resolves\n\n"
-    "<i>Most people keep a small bundle so they're not stuck mid-conversation.</i>"
+    "<i>Pay with Telegram Stars. Keep a small bundle so you're not stuck mid-conversation.</i>"
 )
 
 HELP_TEXT = (
@@ -66,7 +67,9 @@ HELP_TEXT = (
     "<b>Free tier:</b>\n"
     f"{EMOJIS['free']} 1 Stabilize resolve per day\n\n"
     "<b>Paid tier:</b>\n"
-    f"{EMOJIS['paid']} All goals + retries"
+    f"{EMOJIS['paid']} All goals + retries\n\n"
+    "<b>Extras:</b>\n"
+    "/settings to set defaults, /buy for Stars bundles"
 )
 
 ACCOUNT_TEMPLATE = (
@@ -113,12 +116,19 @@ BOT_COMMANDS = [
     ("feedback", "Send feedback to improve the bot."),
 ]
 
-SETTINGS_TEMPLATE = (
-    f"{EMOJIS['settings']} <b>Settings</b>\n\n"
-    "Default goal: {default_goal}\n"
-    "Default style: {default_style}\n\n"
-    "<i>Pick defaults to speed up /resolve.</i>"
+SETTINGS_TEXT = (
+    f"{EMOJIS['settings']} <b>Settings (defaults)</b>\n"
+    "Set what I preselect for you. You can change this anytime.\n\n"
 )
+
+SETTINGS_STATUS = "Default goal: {default_goal}\nDefault style: {default_style}\n"
+
+FEEDBACK_PROMPT = (
+    f"{EMOJIS['feedback']} <b>Feedback</b>\n\n"
+    "Share what felt good or what should improve. Send one message and I'll log it."
+)
+
+FEEDBACK_THANKS = "Thank you for your feedback! 🙏"
 
 
 def render_options(a: str, b: str, c: str) -> str:

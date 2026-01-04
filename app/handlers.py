@@ -20,19 +20,22 @@ from .texts import (
     ERROR_MESSAGES,
     EMOJIS,
     GOAL_DESCRIPTIONS,
-    SETTINGS_TEMPLATE,
+    SETTINGS_TEXT,
+    SETTINGS_STATUS,
     BOT_COMMANDS,
     render_options,
+    FEEDBACK_PROMPT,
+    FEEDBACK_THANKS,
 )
 
 logger = logging.getLogger(__name__)
 router = Router()
 
 STYLE_OPTIONS = {
-    "neutral": "Neutral",
-    "softer": "Softer",
-    "firmer": "Firmer",
-    "shorter": "Shorter",
+    "neutral": "🙂 Neutral",
+    "softer": "🫧 Softer",
+    "firmer": "🧱 Firmer",
+    "shorter": "✂️ Shorter",
 }
 
 
@@ -58,9 +61,11 @@ def kb_goals():
         )
 
     b.button(text=f"{EMOJIS['buy']} Pricing", callback_data="nav:pricing")
-    b.button(text=f"{EMOJIS['help']} Help", callback_data="nav:help")
     b.button(text=f"{EMOJIS['account']} Account", callback_data="nav:account")
-    b.adjust(3, 1, 1, 1)
+    b.button(text=f"{EMOJIS['settings']} Settings", callback_data="nav:settings")
+    b.button(text=f"{EMOJIS['help']} Help", callback_data="nav:help")
+    b.button(text=f"{EMOJIS['feedback']} Feedback", callback_data="feedback:start")
+    b.adjust(3, 3, 2)
     return b.as_markup()
 
 
@@ -68,7 +73,7 @@ def kb_after_result():
     b = InlineKeyboardBuilder()
     b.button(text=f"{EMOJIS['retry']} Retry", callback_data="retry:menu")
     b.button(text=f"{EMOJIS['buy']} Get more", callback_data="nav:pricing")
-    b.button(text=f"{EMOJIS['back']} Back to goals", callback_data="nav:goals")
+    b.button(text=f"{EMOJIS['back']} Main menu", callback_data="nav:goals")
     b.adjust(2, 1)
     return b.as_markup()
 
@@ -78,7 +83,7 @@ def kb_pricing():
     b.button(text="⭐ 5 Stars — 1 Resolve", callback_data="buy:starter")
     b.button(text="⭐ 20 Stars — 5 Resolves", callback_data="buy:bundle")
     b.button(text="⭐ 50 Stars — 15 Resolves", callback_data="buy:pro")
-    b.button(text=f"{EMOJIS['back']} Back", callback_data="nav:goals")
+    b.button(text=f"{EMOJIS['back']} Main menu", callback_data="nav:goals")
     b.adjust(1, 1, 1, 1)
     return b.as_markup()
 
@@ -92,7 +97,6 @@ def kb_retry_menu():
     b.adjust(3, 1)
     return b.as_markup()
 
-
 def kb_settings():
     b = InlineKeyboardBuilder()
     for goal_key, goal_desc in GOAL_DESCRIPTIONS.items():
@@ -100,13 +104,13 @@ def kb_settings():
             text=f"{goal_desc['emoji']} {goal_desc['name']}",
             callback_data=f"settings:goal:{goal_key}",
         )
-    b.button(text="Clear goal", callback_data="settings:goal:clear")
+    b.button(text="❌ None", callback_data="settings:goal:none")
 
     for style_key, style_label in STYLE_OPTIONS.items():
         b.button(text=style_label, callback_data=f"settings:style:{style_key}")
-    b.button(text="Clear style", callback_data="settings:style:clear")
-    b.button(text=f"{EMOJIS['back']} Back", callback_data="nav:goals")
-    b.adjust(3, 1, 2, 2, 1)
+    b.button(text="❌ None", callback_data="settings:style:none")
+    b.button(text=f"{EMOJIS['back']} Main menu", callback_data="nav:goals")
+    b.adjust(3, 1, 2, 2, 1, 1)
     return b.as_markup()
 
 
@@ -117,10 +121,20 @@ def render_settings_text(user: dict) -> str:
     goal_label = (
         GOAL_DESCRIPTIONS[default_goal]["name"]
         if default_goal in GOAL_DESCRIPTIONS
-        else "Not set"
+        else "None"
     )
-    style_label = STYLE_OPTIONS.get(default_style, "Not set")
-    return SETTINGS_TEMPLATE.format(default_goal=goal_label, default_style=style_label)
+    style_label = STYLE_OPTIONS.get(default_style, "None")
+    return SETTINGS_TEXT + SETTINGS_STATUS.format(
+        default_goal=goal_label, default_style=style_label
+    )
+
+
+def kb_change_goal():
+    b = InlineKeyboardBuilder()
+    b.button(text="Change goal", callback_data="nav:goals")
+    b.button(text=f"{EMOJIS['back']} Main menu", callback_data="nav:goals")
+    b.adjust(2)
+    return b.as_markup()
 
 
 def render_unknown_commands() -> str:
@@ -152,14 +166,19 @@ async def cmd_resolve(msg: Message, state: FSMContext, db: DB):
     user = db.get_user(msg.from_user.id)
     default_goal = user.get("default_goal")
     default_style = user.get("default_style")
-    details = []
-    if default_goal in GOAL_DESCRIPTIONS:
-        details.append(f"Default goal: {GOAL_DESCRIPTIONS[default_goal]['name']}")
-    if default_style in STYLE_OPTIONS:
-        details.append(f"Default style: {STYLE_OPTIONS[default_style]}")
 
-    if details:
-        await msg.answer("\n".join(details) + "\n\nChoose a goal:", reply_markup=kb_goals())
+    if default_goal in GOAL_DESCRIPTIONS:
+        db.set_goal(msg.from_user.id, default_goal)
+        db.set_retry_flags(msg.from_user.id, last_paid=False, free_retry=False)
+        await state.set_state(Flow.waiting_for_text)
+        style_line = ""
+        if default_style in STYLE_OPTIONS:
+            style_line = f"\nDefault style: {STYLE_OPTIONS[default_style]}"
+        await msg.answer(
+            f"Default goal: {GOAL_DESCRIPTIONS[default_goal]['name']}{style_line}\n\n"
+            f"{GOAL_PROMPTS[default_goal]}",
+            reply_markup=kb_change_goal(),
+        )
     else:
         await msg.answer("Choose a goal:", reply_markup=kb_goals())
 
@@ -170,7 +189,40 @@ async def cmd_pricing(msg: Message):
 
 
 @router.message(Command("buy"))
-async def cmd_buy(msg: Message):
+async def cmd_buy(msg: Message, command: CommandObject, bot: Bot):
+    plan_id = (command.args or "").strip().lower()
+    if plan_id in PLANS:
+        payload = create_invoice_payload(msg.from_user.id, plan_id)
+        if not payload:
+            await msg.answer("Payments are not configured yet.")
+            return
+
+        plan = PLANS[plan_id]
+        prices = [LabeledPrice(label=f"{plan.resolves} Resolves", amount=plan.stars * 100)]
+        try:
+            await bot.send_invoice(
+                chat_id=msg.from_user.id,
+                title=f"{plan.name} - The Resolver",
+                description=f"Get {plan.resolves} resolve(s) for The Resolver bot",
+                payload=payload,
+                provider_token="",
+                currency="XTR",
+                prices=prices,
+                start_parameter="resolver_bot",
+                need_email=False,
+                need_name=False,
+                need_phone_number=False,
+                need_shipping_address=False,
+                is_flexible=False,
+                disable_notification=True,
+                protect_content=False,
+            )
+            return
+        except Exception as exc:
+            logger.error("Failed to send invoice: %s", exc)
+            await msg.answer("Failed to create invoice. Please try again.")
+            return
+
     await msg.answer(PRICING_TEXT, reply_markup=kb_pricing())
 
 
@@ -196,7 +248,7 @@ async def cmd_account(msg: Message, db: DB):
         account_age=stats.get("account_age_days", 0),
     )
 
-    await msg.answer(text)
+    await msg.answer(text, reply_markup=kb_goals())
 
 
 @router.message(Command("settings"))
@@ -208,7 +260,8 @@ async def cmd_settings(msg: Message, db: DB):
 
 
 @router.message(Command("feedback"))
-async def cmd_feedback(msg: Message, command: CommandObject, db: DB):
+async def cmd_feedback(msg: Message, command: CommandObject, state: FSMContext, db: DB):
+    await state.clear()
     feedback = command.args
     if feedback:
         db.add_feedback(msg.from_user.id, feedback.strip())
@@ -218,23 +271,38 @@ async def cmd_feedback(msg: Message, command: CommandObject, db: DB):
             len(feedback),
         )
         logger.debug("Feedback detail from user %s: %s", msg.from_user.id, feedback)
-        await msg.answer("Thank you for your feedback! 🙏")
+        await msg.answer(FEEDBACK_THANKS, reply_markup=kb_goals())
     else:
-        await msg.answer(
-            "Please provide feedback: /feedback <your feedback>\n\n"
-            "Example: /feedback The pricing page is clear but I'd love more bundles."
-        )
+        await msg.answer(FEEDBACK_PROMPT, reply_markup=kb_goals())
+        await state.set_state(Flow.waiting_for_feedback)
+
+
+@router.callback_query(F.data == "feedback:start")
+async def feedback_start_handler(cb: CallbackQuery, state: FSMContext):
+    await state.clear()
+    try:
+        await cb.message.edit_text(FEEDBACK_PROMPT, reply_markup=kb_goals())
+    except TelegramBadRequest:
+        await cb.message.answer(FEEDBACK_PROMPT, reply_markup=kb_goals())
+    await state.set_state(Flow.waiting_for_feedback)
+    await cb.answer()
 
 
 @router.callback_query(F.data.startswith("nav:"))
 async def nav_handler(cb: CallbackQuery, state: FSMContext, db: DB):
     action = cb.data.split(":", 1)[1]
+    await state.clear()
 
     try:
         if action == "pricing":
             await cb.message.edit_text(PRICING_TEXT, reply_markup=kb_pricing())
         elif action == "help":
             await cb.message.edit_text(_maybe_add_fallback(HELP_TEXT), reply_markup=kb_goals())
+        elif action == "settings":
+            user_id = cb.from_user.id
+            db.ensure_user(user_id)
+            user = db.get_user(user_id)
+            await cb.message.edit_text(render_settings_text(user), reply_markup=kb_settings())
         elif action == "account":
             user_id = cb.from_user.id
             db.ensure_user(user_id)
@@ -268,7 +336,10 @@ async def choose_goal(cb: CallbackQuery, state: FSMContext, db: DB):
     db.set_retry_flags(user_id, last_paid=False, free_retry=False)
 
     await state.set_state(Flow.waiting_for_text)
-    await cb.message.edit_text(GOAL_PROMPTS[goal])
+    try:
+        await cb.message.edit_text(GOAL_PROMPTS[goal])
+    except TelegramBadRequest:
+        await cb.message.answer(GOAL_PROMPTS[goal])
     await cb.answer()
 
 
@@ -279,13 +350,13 @@ async def settings_handler(cb: CallbackQuery, db: DB):
     db.ensure_user(user_id)
 
     if setting == "goal":
-        goal_value = None if value == "clear" else value
+        goal_value = None if value == "none" else value
         if goal_value is not None and goal_value not in GOAL_DESCRIPTIONS:
             await cb.answer("Unknown goal option.")
             return
         db.set_default_goal(user_id, goal_value)
     elif setting == "style":
-        style_value = None if value == "clear" else value
+        style_value = None if value == "none" else value
         if style_value is not None and style_value not in STYLE_OPTIONS:
             await cb.answer("Unknown style option.")
             return
@@ -295,7 +366,10 @@ async def settings_handler(cb: CallbackQuery, db: DB):
         return
 
     user = db.get_user(user_id)
-    await cb.message.edit_text(render_settings_text(user), reply_markup=kb_settings())
+    try:
+        await cb.message.edit_text(render_settings_text(user), reply_markup=kb_settings())
+    except TelegramBadRequest:
+        await cb.message.answer(render_settings_text(user), reply_markup=kb_settings())
     await cb.answer("Settings saved.")
 
 
@@ -326,12 +400,15 @@ async def on_text_input(msg: Message, state: FSMContext, db: DB):
         await msg.answer("Choose a goal first:", reply_markup=kb_goals())
         return
 
+    default_style = user.get("default_style")
+    modifier = default_style if default_style in STYLE_OPTIONS else None
+
     if user.get("resolves_remaining", 0) > 0 and db.consume_paid_resolve(user_id):
         db.set_last_input(user_id, text)
         db.set_retry_flags(user_id, last_paid=True, free_retry=True)
 
         typing_msg = await msg.answer("🧠 Thinking...")
-        responses = await llm_client.generate_responses(goal, text)
+        responses = await llm_client.generate_responses(goal, text, modifier)
         db.log_interaction(user_id, goal, text, responses, used_paid=True)
 
         await typing_msg.delete()
@@ -344,7 +421,7 @@ async def on_text_input(msg: Message, state: FSMContext, db: DB):
         db.set_retry_flags(user_id, last_paid=False, free_retry=False)
 
         typing_msg = await msg.answer("🧠 Thinking...")
-        responses = await llm_client.generate_responses(goal, text)
+        responses = await llm_client.generate_responses(goal, text, modifier)
         db.log_interaction(user_id, goal, text, responses, used_paid=False)
 
         await typing_msg.delete()
@@ -352,6 +429,28 @@ async def on_text_input(msg: Message, state: FSMContext, db: DB):
         return
 
     await msg.answer(ERROR_MESSAGES["no_resolves"], reply_markup=kb_pricing())
+
+
+@router.message(Flow.waiting_for_feedback)
+async def on_feedback_message(msg: Message, state: FSMContext, db: DB):
+    if not msg.text:
+        await msg.answer("Please send your feedback as text.")
+        return
+
+    feedback = msg.text.strip()
+    if not feedback:
+        await msg.answer("Please send your feedback as text.")
+        return
+
+    db.add_feedback(msg.from_user.id, feedback)
+    logger.info(
+        "Feedback received from user %s (length=%s)",
+        msg.from_user.id,
+        len(feedback),
+    )
+    logger.debug("Feedback detail from user %s: %s", msg.from_user.id, feedback)
+    await state.clear()
+    await msg.answer(FEEDBACK_THANKS, reply_markup=kb_goals())
 
 
 @router.callback_query(F.data == "retry:menu")
@@ -538,4 +637,4 @@ async def successful_payment(msg: Message, db: DB):
 
 @router.message()
 async def unknown_message(msg: Message):
-    await msg.answer(render_unknown_commands())
+    await msg.answer(render_unknown_commands(), reply_markup=kb_goals())
