@@ -22,7 +22,7 @@ A Telegram bot that helps you say the right thing without escalating conversatio
 
 ### 1) Clone and install
 ```bash
-git clone git@github.com:Justadudeinspace.git
+git clone https://github.com/Justadudeinspace/resolver.git
 cd resolver
 chmod +x install_resolver.sh
 ./install_resolver.sh
@@ -121,9 +121,13 @@ chmod +x install_resolver.sh
 │   └── texts.py
 ├── .env.example
 ├── .gitignore
+├── docs/
+│   ├── assets/
+│   ├── LAUNCH_CHECKLIST.md
+│   ├── MVP_CHECKLIST.md
+│   ├── resolver.md
 ├── install_resolver.sh
 ├── LICENSE
-├── MVP_CHECKLIST.md
 ├── requirements.txt
 ├── run_resolver.sh
 └── README.md

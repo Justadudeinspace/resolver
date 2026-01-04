@@ -12,7 +12,8 @@ This file documents the current repo structure, the startup commands, and the MV
 | .env.example | Environment variable template |
 | .gitignore | Prevents secrets, DBs, logs, venvs, caches from commit |
 | LICENSE | Proprietary license |
-| MVP_CHECKLIST.md | Ready-to-run checklist |
+| docs/MVP_CHECKLIST.md | Ready-to-run checklist |
+| docs/LAUNCH_CHECKLIST.md | Operator launch checklist |
 | app/__init__.py | Package init |
 | app/main.py | Bot entrypoint (aiogram v3) |
 | app/config.py | Pydantic settings |
