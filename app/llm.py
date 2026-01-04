@@ -75,6 +75,8 @@ class LLMClient:
         self, goal: str, user_text: str, modifier: Optional[str] = None
     ) -> List[str]:
         """Generate three response options based on goal and modifier."""
+        if modifier == "neutral":
+            modifier = None
         if not self.use_openai:
             return self._generate_template_responses(goal, modifier)
 

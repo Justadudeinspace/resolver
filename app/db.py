@@ -188,6 +188,22 @@ class DB:
             row = cursor.fetchone()
             return dict(row) if row else {}
 
+    def get_defaults(self, user_id: int) -> Dict[str, Optional[str]]:
+        """Get default goal and style for a user"""
+        with self._conn() as conn:
+            self._ensure_user_conn(conn, user_id)
+            cursor = conn.execute(
+                "SELECT default_goal, default_style FROM users WHERE user_id = ?",
+                (user_id,),
+            )
+            row = cursor.fetchone()
+            if not row:
+                return {"default_goal": None, "default_style": None}
+            return {
+                "default_goal": row["default_goal"],
+                "default_style": row["default_style"],
+            }
+
     def set_goal(self, user_id: int, goal: str) -> None:
         """Set current goal for user"""
         with self._conn() as conn:
