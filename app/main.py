@@ -6,12 +6,13 @@ from pathlib import Path
 from aiogram import Bot, Dispatcher
 from aiogram.enums import ParseMode
 from aiogram.fsm.storage.memory import MemoryStorage
+from aiogram.types import BotCommand
 
 from .config import settings
 from .db import DB
 from .handlers import router
 from .middlewares import RateLimitMiddleware
-from .texts import ERROR_MESSAGES
+from .texts import ERROR_MESSAGES, BOT_COMMANDS
 
 
 def setup_logging() -> Logger:
@@ -68,6 +69,9 @@ async def main() -> None:
         logger.error("Failed to fetch bot info: %s", exc)
 
     try:
+        await bot.set_my_commands(
+            [BotCommand(command=command, description=description) for command, description in BOT_COMMANDS]
+        )
         await dp.start_polling(bot, allowed_updates=dp.resolve_used_update_types())
     except Exception as exc:
         logger.error("Bot failed: %s", exc)

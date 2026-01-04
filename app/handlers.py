@@ -20,11 +20,20 @@ from .texts import (
     ERROR_MESSAGES,
     EMOJIS,
     GOAL_DESCRIPTIONS,
+    SETTINGS_TEMPLATE,
+    BOT_COMMANDS,
     render_options,
 )
 
 logger = logging.getLogger(__name__)
 router = Router()
+
+STYLE_OPTIONS = {
+    "neutral": "Neutral",
+    "softer": "Softer",
+    "firmer": "Firmer",
+    "shorter": "Shorter",
+}
 
 
 def _fallback_notice() -> str:
@@ -84,6 +93,43 @@ def kb_retry_menu():
     return b.as_markup()
 
 
+def kb_settings():
+    b = InlineKeyboardBuilder()
+    for goal_key, goal_desc in GOAL_DESCRIPTIONS.items():
+        b.button(
+            text=f"{goal_desc['emoji']} {goal_desc['name']}",
+            callback_data=f"settings:goal:{goal_key}",
+        )
+    b.button(text="Clear goal", callback_data="settings:goal:clear")
+
+    for style_key, style_label in STYLE_OPTIONS.items():
+        b.button(text=style_label, callback_data=f"settings:style:{style_key}")
+    b.button(text="Clear style", callback_data="settings:style:clear")
+    b.button(text=f"{EMOJIS['back']} Back", callback_data="nav:goals")
+    b.adjust(3, 1, 2, 2, 1)
+    return b.as_markup()
+
+
+def render_settings_text(user: dict) -> str:
+    default_goal = user.get("default_goal")
+    default_style = user.get("default_style")
+
+    goal_label = (
+        GOAL_DESCRIPTIONS[default_goal]["name"]
+        if default_goal in GOAL_DESCRIPTIONS
+        else "Not set"
+    )
+    style_label = STYLE_OPTIONS.get(default_style, "Not set")
+    return SETTINGS_TEMPLATE.format(default_goal=goal_label, default_style=style_label)
+
+
+def render_unknown_commands() -> str:
+    lines = ["I didn't understand that. Try:"]
+    for command, description in BOT_COMMANDS:
+        lines.append(f"/{command} - {description}")
+    return "\n".join(lines)
+
+
 @router.message(Command("start"))
 async def cmd_start(msg: Message, state: FSMContext, db: DB):
     await state.clear()
@@ -103,11 +149,28 @@ async def cmd_start(msg: Message, state: FSMContext, db: DB):
 async def cmd_resolve(msg: Message, state: FSMContext, db: DB):
     await state.clear()
     db.ensure_user(msg.from_user.id)
-    await msg.answer("Choose a goal:", reply_markup=kb_goals())
+    user = db.get_user(msg.from_user.id)
+    default_goal = user.get("default_goal")
+    default_style = user.get("default_style")
+    details = []
+    if default_goal in GOAL_DESCRIPTIONS:
+        details.append(f"Default goal: {GOAL_DESCRIPTIONS[default_goal]['name']}")
+    if default_style in STYLE_OPTIONS:
+        details.append(f"Default style: {STYLE_OPTIONS[default_style]}")
+
+    if details:
+        await msg.answer("\n".join(details) + "\n\nChoose a goal:", reply_markup=kb_goals())
+    else:
+        await msg.answer("Choose a goal:", reply_markup=kb_goals())
 
 
 @router.message(Command("pricing"))
 async def cmd_pricing(msg: Message):
+    await msg.answer(PRICING_TEXT, reply_markup=kb_pricing())
+
+
+@router.message(Command("buy"))
+async def cmd_buy(msg: Message):
     await msg.answer(PRICING_TEXT, reply_markup=kb_pricing())
 
 
@@ -136,14 +199,31 @@ async def cmd_account(msg: Message, db: DB):
     await msg.answer(text)
 
 
+@router.message(Command("settings"))
+async def cmd_settings(msg: Message, db: DB):
+    user_id = msg.from_user.id
+    db.ensure_user(user_id)
+    user = db.get_user(user_id)
+    await msg.answer(render_settings_text(user), reply_markup=kb_settings())
+
+
 @router.message(Command("feedback"))
-async def cmd_feedback(msg: Message, command: CommandObject):
+async def cmd_feedback(msg: Message, command: CommandObject, db: DB):
     feedback = command.args
     if feedback:
-        logger.info("Feedback from %s: %s", msg.from_user.id, feedback)
+        db.add_feedback(msg.from_user.id, feedback.strip())
+        logger.info(
+            "Feedback received from user %s (length=%s)",
+            msg.from_user.id,
+            len(feedback),
+        )
+        logger.debug("Feedback detail from user %s: %s", msg.from_user.id, feedback)
         await msg.answer("Thank you for your feedback! 🙏")
     else:
-        await msg.answer("Please provide feedback: /feedback <your feedback>")
+        await msg.answer(
+            "Please provide feedback: /feedback <your feedback>\n\n"
+            "Example: /feedback The pricing page is clear but I'd love more bundles."
+        )
 
 
 @router.callback_query(F.data.startswith("nav:"))
@@ -190,6 +270,33 @@ async def choose_goal(cb: CallbackQuery, state: FSMContext, db: DB):
     await state.set_state(Flow.waiting_for_text)
     await cb.message.edit_text(GOAL_PROMPTS[goal])
     await cb.answer()
+
+
+@router.callback_query(F.data.startswith("settings:"))
+async def settings_handler(cb: CallbackQuery, db: DB):
+    _, setting, value = cb.data.split(":", 2)
+    user_id = cb.from_user.id
+    db.ensure_user(user_id)
+
+    if setting == "goal":
+        goal_value = None if value == "clear" else value
+        if goal_value is not None and goal_value not in GOAL_DESCRIPTIONS:
+            await cb.answer("Unknown goal option.")
+            return
+        db.set_default_goal(user_id, goal_value)
+    elif setting == "style":
+        style_value = None if value == "clear" else value
+        if style_value is not None and style_value not in STYLE_OPTIONS:
+            await cb.answer("Unknown style option.")
+            return
+        db.set_default_style(user_id, style_value)
+    else:
+        await cb.answer("Unknown setting.")
+        return
+
+    user = db.get_user(user_id)
+    await cb.message.edit_text(render_settings_text(user), reply_markup=kb_settings())
+    await cb.answer("Settings saved.")
 
 
 @router.message(Flow.waiting_for_text)
@@ -431,10 +538,4 @@ async def successful_payment(msg: Message, db: DB):
 
 @router.message()
 async def unknown_message(msg: Message):
-    await msg.answer(
-        "I didn't understand that. Try:\n"
-        "/start - Start the bot\n"
-        "/resolve - Start a new resolution\n"
-        "/help - Get help\n"
-        "/account - Check your account"
-    )
+    await msg.answer(render_unknown_commands())

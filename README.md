@@ -71,12 +71,14 @@ chmod +x install_resolver.sh
   - Pro: 50 ⭐ = 15 resolves
 
 ## Commands
-- `/start` - Start the bot
-- `/resolve` - Start a new resolution
-- `/pricing` - View pricing plans
-- `/account` - Check your account status
-- `/help` - Get help
-- `/feedback <message>` - Send feedback
+- `/start` - Begin. Choose a goal and resolve a message.
+- `/resolve` - Resolve a message by choosing a goal and getting clear options.
+- `/pricing` - View resolve pricing and Star bundles.
+- `/buy` - Purchase resolve bundles with Stars.
+- `/account` - View your remaining resolves and usage.
+- `/settings` - Set your default goal and response style.
+- `/help` - Learn how to use The Resolver.
+- `/feedback` - Send feedback to improve the bot.
 
 ## File Structure
 ```

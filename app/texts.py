@@ -12,6 +12,7 @@ EMOJIS = {
     "back": "↩️",
     "buy": "🛒",
     "account": "👤",
+    "settings": "⚙️",
 }
 
 START_TEXT = (
@@ -100,6 +101,24 @@ ERROR_MESSAGES = {
         "Please try again in a moment."
     ),
 }
+
+BOT_COMMANDS = [
+    ("start", "Begin. Choose a goal and resolve a message."),
+    ("resolve", "Resolve a message by choosing a goal and getting clear options."),
+    ("pricing", "View resolve pricing and Star bundles."),
+    ("buy", "Purchase resolve bundles with Stars."),
+    ("account", "View your remaining resolves and usage."),
+    ("settings", "Set your default goal and response style."),
+    ("help", "Learn how to use The Resolver."),
+    ("feedback", "Send feedback to improve the bot."),
+]
+
+SETTINGS_TEMPLATE = (
+    f"{EMOJIS['settings']} <b>Settings</b>\n\n"
+    "Default goal: {default_goal}\n"
+    "Default style: {default_style}\n\n"
+    "<i>Pick defaults to speed up /resolve.</i>"
+)
 
 
 def render_options(a: str, b: str, c: str) -> str:
