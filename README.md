@@ -140,4 +140,4 @@ python -m compileall app
 - Added a feedback submenu and database logging for feedback messages.
 
 ## License
-Proprietary - All rights reserved.
+[Proprietary](./LICENSE) - All rights reserved.
