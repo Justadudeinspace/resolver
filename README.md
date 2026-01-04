@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="docs/assets/resolver.png" alt="The Resolver Bot" width="300">
+</p>
+
 # The Resolver Bot
 
 A Telegram bot that helps you say the right thing without escalating conversations.
