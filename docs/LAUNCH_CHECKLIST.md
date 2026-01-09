@@ -13,6 +13,8 @@ This checklist covers what Codex fixed, what still requires human action, and ho
   - HOW TO VERIFY: `rg -n "placeholder" app/config.py`
 - [ ] Compile step passes.
   - HOW TO VERIFY: `python -m compileall app`
+- [ ] Smoke check passes.
+  - HOW TO VERIFY: `python scripts/smoke_check.py`
 - [ ] Database health check succeeds.
   - HOW TO VERIFY: `python -c "from app.config import settings; from app.db import DB; print(DB(settings.db_path).health_check())"`
 - [ ] Handlers/router import succeeds.
