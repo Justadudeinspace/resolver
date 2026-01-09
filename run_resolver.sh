@@ -188,6 +188,12 @@ else
     exit 1
 fi
 
+print_info "Running smoke check..."
+if ! PYTHONPATH=. $PYTHON_BIN scripts/smoke_check.py; then
+    print_error "Smoke check failed"
+    exit 1
+fi
+
 print_info "Starting The Resolver bot..."
 print_info "Press Ctrl+C to stop"
 
