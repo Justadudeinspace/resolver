@@ -56,12 +56,17 @@ print_banner() {
 print_banner
 
 print_step "Checking Python..."
-if ! command -v python3 &> /dev/null; then
+if command -v python3 &> /dev/null; then
+    PYTHON_BIN="python3"
+elif command -v python &> /dev/null; then
+    PYTHON_BIN="python"
+else
     case $PLATFORM in
         termux)
             print_info "Installing Python3 in Termux..."
             pkg update -y && pkg upgrade -y
             pkg install -y python3
+            PYTHON_BIN="python3"
             ;;
         *)
             print_error "Python3 not found!"
@@ -130,13 +135,29 @@ if [ ! -f "requirements.txt" ]; then
     exit 1
 fi
 
-run_optional python3 -m pip install --upgrade pip
+VENV_DIR=".venv"
+VENV_PYTHON="$PYTHON_BIN"
+
+if [ "$PLATFORM" != "termux" ]; then
+    if [ ! -d "$VENV_DIR" ]; then
+        print_info "Creating virtual environment..."
+        run_optional "$PYTHON_BIN" -m venv "$VENV_DIR"
+    fi
+    if [ -x "$VENV_DIR/bin/python" ]; then
+        VENV_PYTHON="$VENV_DIR/bin/python"
+    else
+        print_error "Virtual environment creation failed"
+        exit 1
+    fi
+fi
+
+run_optional "$VENV_PYTHON" -m pip install --upgrade pip
 
 if [ "$PLATFORM" = "termux" ]; then
     print_info "Installing packages individually for Termux..."
-    run_optional python3 -m pip install aiogram python-dotenv pydantic pydantic-settings cachetools openai cryptography
+    run_optional "$VENV_PYTHON" -m pip install aiogram python-dotenv pydantic pydantic-settings cachetools openai cryptography
 else
-    run_optional python3 -m pip install -r requirements.txt
+    run_optional "$VENV_PYTHON" -m pip install -r requirements.txt
 fi
 print_success "Python requirements installed"
 
