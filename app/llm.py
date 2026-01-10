@@ -5,6 +5,7 @@ from typing import List, Optional
 from openai import AsyncOpenAI
 
 from .config import settings
+from .languages import LANGUAGE_LABELS, LANGUAGE_MODE_DESCRIPTIONS
 
 logger = logging.getLogger(__name__)
 
@@ -72,7 +73,12 @@ class LLMClient:
             logger.info("LLM client using template responses")
 
     async def generate_responses(
-        self, goal: str, user_text: str, modifier: Optional[str] = None
+        self,
+        goal: str,
+        user_text: str,
+        modifier: Optional[str] = None,
+        language: str = "en",
+        language_mode: str = "clean",
     ) -> List[str]:
         """Generate three response options based on goal and modifier."""
         if modifier == "neutral":
@@ -82,7 +88,7 @@ class LLMClient:
 
         try:
             prompt = self._build_prompt(user_text, modifier)
-            system_prompt = SYSTEM_PROMPTS.get(goal, SYSTEM_PROMPTS["stabilize"])
+            system_prompt = self._build_system_prompt(goal, language, language_mode)
 
             response = await self.client.chat.completions.create(
                 model=self.model,
@@ -108,6 +114,23 @@ class LLMClient:
             prompt += f"\n\nAdditional instruction: {MODIFIER_HINTS.get(modifier, modifier)}"
 
         return prompt
+
+    def _build_system_prompt(self, goal: str, language: str, language_mode: str) -> str:
+        base_prompt = SYSTEM_PROMPTS.get(goal, SYSTEM_PROMPTS["stabilize"])
+        language_name = LANGUAGE_LABELS.get(language, language)
+        mode_description = LANGUAGE_MODE_DESCRIPTIONS.get(
+            language_mode, LANGUAGE_MODE_DESCRIPTIONS["clean"]
+        )
+        mode_block = (
+            f"\n\nLANGUAGE MODE: {language_mode.upper()}\n"
+            f"- {mode_description}\n"
+            "- Never include harassment, threats, or targeted hate."
+        )
+        language_block = (
+            f"\n\nLANGUAGE:\n"
+            f"- Respond in {language_name} (code: {language})."
+        )
+        return f"{base_prompt}{language_block}{mode_block}"
 
     def _parse_responses_robust(self, content: str) -> List[str]:
         content = content.strip()

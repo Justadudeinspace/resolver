@@ -72,7 +72,9 @@ HELP_TEXT = (
     "/pricing — view Stars plans\n"
     "/buy — purchase a plan\n"
     "/account — usage and resolves\n"
-    "/settings — default goal & tone\n"
+    "/settings — defaults + language (v2 personal)\n"
+    "/groupadmin — group settings (admins only)\n"
+    "/grouplogs — moderation logs (admins only)\n"
     "/help — this screen\n"
     "/feedback — send feedback\n\n"
     "<b>Payments:</b>\n"
@@ -118,7 +120,9 @@ BOT_COMMANDS = [
     ("pricing", "View resolve pricing and Star bundles."),
     ("buy", "Purchase resolve bundles with Stars."),
     ("account", "View your remaining resolves and usage."),
-    ("settings", "Set your default goal and response style."),
+    ("settings", "Set defaults and language (v2 personal)."),
+    ("groupadmin", "Admin-only group control panel."),
+    ("grouplogs", "Admin-only moderation logs."),
     ("help", "Learn how to use The Resolver."),
     ("feedback", "Send feedback to improve the bot."),
 ]
@@ -129,6 +133,11 @@ SETTINGS_TEXT = (
 )
 
 SETTINGS_STATUS = "Default goal: {default_goal}\nDefault tone: {default_style}\n"
+
+SETTINGS_V2_DISABLED = (
+    "⚠️ <b>V2 Personal is disabled.</b>\n"
+    "Language and language mode controls are unavailable.\n\n"
+)
 
 FEEDBACK_PROMPT = (
     f"{EMOJIS['feedback']} <b>Feedback</b>\n\n"
