@@ -50,6 +50,7 @@ class Settings(BaseSettings):
             return "INFO"
         return level
 
+    # Note: This list is duplicated in run_resolver.sh. Keep them in sync.
     _placeholder_markers = ("CHANGE_ME", "YOUR_SECRET_HERE", "REPLACE_ME", "INSERT_SECRET", "EXAMPLE")
 
     def _is_placeholder(self, value: str) -> bool:
