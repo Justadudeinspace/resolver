@@ -100,8 +100,10 @@ fi
 # Check Python
 if command -v python3 &> /dev/null; then
     PYTHON_BIN="python3"
+elif command -v python &> /dev/null; then
+    PYTHON_BIN="python"
 else
-    print_error "Python3 not found"
+    print_error "Python 3 not found"
     exit 1
 fi
 
@@ -197,4 +199,9 @@ fi
 print_info "Starting The Resolver bot..."
 print_info "Press Ctrl+C to stop"
 
-PYTHONPATH=. $PYTHON_BIN -u -m app.main
+RUN_PYTHON="python"
+if ! command -v "$RUN_PYTHON" &> /dev/null; then
+    RUN_PYTHON="$PYTHON_BIN"
+fi
+
+PYTHONPATH=. $RUN_PYTHON -u -m app.main
