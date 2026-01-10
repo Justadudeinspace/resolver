@@ -46,6 +46,7 @@ read_env_value() {
     return 1
 }
 
+# Note: This list is duplicated in app/config.py. Keep them in sync.
 PLACEHOLDER_MARKERS=("CHANGE_ME" "YOUR_SECRET_HERE" "REPLACE_ME" "INSERT_SECRET" "EXAMPLE")
 
 is_placeholder_value() {
