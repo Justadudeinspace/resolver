@@ -9,8 +9,8 @@ This checklist covers what Codex fixed, what still requires human action, and ho
   - HOW TO VERIFY: `rg -n "INVOICE_SECRET=CHANGE_ME" .env.example`
 - [ ] ✅ Codex fixed: `run_resolver.sh` now blocks placeholder or too-short `INVOICE_SECRET` values.
   - HOW TO VERIFY: `rg -n "INVOICE_SECRET" run_resolver.sh`
-- [ ] ✅ Codex fixed: config validation rejects placeholder `INVOICE_SECRET` values.
-  - HOW TO VERIFY: `rg -n "placeholder" app/config.py`
+- [ ] ✅ Codex fixed: settings validation flags placeholder `INVOICE_SECRET` values.
+  - HOW TO VERIFY: `rg -n "invoice_secret_valid" app/config.py`
 - [ ] Compile step passes.
   - HOW TO VERIFY: `python -m compileall app`
 - [ ] Smoke check passes.

@@ -41,12 +41,12 @@ def setup_logging() -> Logger:
 async def main() -> None:
     logger = setup_logging()
 
-    if not settings.bot_token or "your_token_here" in settings.bot_token:
+    if not settings.bot_token_valid:
         logger.error("BOT_TOKEN is missing. Update your .env file.")
         print(ERROR_MESSAGES["config_missing"])
         return
 
-    if not settings.invoice_secret or len(settings.invoice_secret) < 32:
+    if not settings.invoice_secret_valid:
         logger.error("INVOICE_SECRET is missing or too short; payments require a 32+ char secret.")
         print(ERROR_MESSAGES["config_missing"])
         return

@@ -44,7 +44,7 @@ GROUP_PLANS: Dict[str, GroupPlan] = {
 
 
 def _secret_ready() -> bool:
-    return bool(settings.invoice_secret and len(settings.invoice_secret) >= MIN_SECRET_LENGTH)
+    return settings.invoice_secret_valid
 
 
 def _sign(payload: str) -> Optional[str]:

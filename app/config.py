@@ -50,24 +50,23 @@ class Settings(BaseSettings):
             return "INFO"
         return level
 
-    @field_validator("bot_token")
-    @classmethod
-    def validate_bot_token(cls, value: str) -> str:
-        if not value or "your_token_here" in value:
-            raise ValueError(
-                "BOT_TOKEN is missing or still a placeholder. Edit .env and set BOT_TOKEN."
-            )
-        return value
+    # Note: This list is duplicated in run_resolver.sh. Keep them in sync.
+    _placeholder_markers = ("CHANGE_ME", "YOUR_SECRET_HERE", "REPLACE_ME", "INSERT_SECRET", "EXAMPLE")
 
-    @field_validator("invoice_secret")
-    @classmethod
-    def validate_invoice_secret(cls, value: str) -> str:
-        placeholder_markers = ("CHANGE_ME", "generate_a_secure_random_string_here")
-        if not value or len(value) < 32 or any(marker in value for marker in placeholder_markers):
-            raise ValueError(
-                "INVOICE_SECRET must be at least 32 characters long and not a placeholder."
-            )
-        return value
+    def _is_placeholder(self, value: str) -> bool:
+        return any(marker in value for marker in self._placeholder_markers)
+
+    @property
+    def bot_token_valid(self) -> bool:
+        return bool(self.bot_token and not self._is_placeholder(self.bot_token))
+
+    @property
+    def invoice_secret_valid(self) -> bool:
+        return bool(
+            self.invoice_secret
+            and len(self.invoice_secret) >= 32
+            and not self._is_placeholder(self.invoice_secret)
+        )
 
     @property
     def use_llm(self) -> bool:
