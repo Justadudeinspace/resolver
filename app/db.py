@@ -22,6 +22,9 @@ CREATE TABLE IF NOT EXISTS users (
     last_input_text TEXT,
     default_goal TEXT,
     default_style TEXT,
+    language TEXT DEFAULT 'en',
+    language_mode TEXT DEFAULT 'clean',
+    v2_enabled INTEGER NOT NULL DEFAULT 0,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
@@ -56,10 +59,56 @@ CREATE TABLE IF NOT EXISTS purchases (
 
 CREATE TABLE IF NOT EXISTS feedback (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
+    ts INTEGER NOT NULL,
     user_id INTEGER NOT NULL,
-    message TEXT NOT NULL,
+    text TEXT NOT NULL,
+    meta_json TEXT NOT NULL,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY(user_id) REFERENCES users(user_id)
+);
+
+CREATE TABLE IF NOT EXISTS groups (
+    group_id INTEGER PRIMARY KEY,
+    enabled INTEGER NOT NULL DEFAULT 0,
+    language TEXT NOT NULL DEFAULT 'en',
+    language_mode TEXT NOT NULL DEFAULT 'clean',
+    warn_threshold INTEGER NOT NULL DEFAULT 2,
+    mute_threshold INTEGER NOT NULL DEFAULT 3,
+    welcome_enabled INTEGER NOT NULL DEFAULT 0,
+    rules_enabled INTEGER NOT NULL DEFAULT 0,
+    security_enabled INTEGER NOT NULL DEFAULT 0,
+    created_at INTEGER DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS group_user_state (
+    group_id INTEGER NOT NULL,
+    user_id INTEGER NOT NULL,
+    violations INTEGER NOT NULL DEFAULT 0,
+    last_ts INTEGER,
+    PRIMARY KEY (group_id, user_id)
+);
+
+CREATE TABLE IF NOT EXISTS moderation_log (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    ts INTEGER NOT NULL,
+    group_id INTEGER NOT NULL,
+    user_id INTEGER NOT NULL,
+    trigger TEXT NOT NULL,
+    decision_summary TEXT NOT NULL,
+    action TEXT NOT NULL,
+    meta_json TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS group_subscriptions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    group_id INTEGER NOT NULL,
+    plan_id TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'active',
+    start_ts INTEGER NOT NULL,
+    end_ts INTEGER,
+    stars_amount INTEGER NOT NULL,
+    transaction_id TEXT NOT NULL UNIQUE,
+    created_at INTEGER DEFAULT CURRENT_TIMESTAMP
 );
 """
 
@@ -90,6 +139,8 @@ class DB:
 
             conn.executescript(SCHEMA)
             self._ensure_user_columns(conn)
+            self._ensure_feedback_columns(conn)
+            self._ensure_group_columns(conn)
             conn.commit()
             self._initialized = True
             logger.info("Database initialized with WAL mode")
@@ -105,11 +156,62 @@ class DB:
         missing_columns = {
             "default_goal": "TEXT",
             "default_style": "TEXT",
+            "language": "TEXT DEFAULT 'en'",
+            "language_mode": "TEXT DEFAULT 'clean'",
+            "v2_enabled": "INTEGER NOT NULL DEFAULT 0",
         }
         for column, column_type in missing_columns.items():
             if column not in existing:
                 conn.execute(f"ALTER TABLE users ADD COLUMN {column} {column_type}")
                 logger.info("Added missing column to users: %s", column)
+
+        conn.execute("UPDATE users SET language = 'en' WHERE language IS NULL")
+        conn.execute("UPDATE users SET language_mode = 'clean' WHERE language_mode IS NULL")
+        conn.execute("UPDATE users SET v2_enabled = 0 WHERE v2_enabled IS NULL")
+
+    def _ensure_feedback_columns(self, conn: sqlite3.Connection) -> None:
+        cursor = conn.execute("PRAGMA table_info(feedback)")
+        existing = {row[1] for row in cursor.fetchall()}
+        missing_columns = {
+            "ts": "INTEGER",
+            "text": "TEXT",
+            "meta_json": "TEXT",
+        }
+        for column, column_type in missing_columns.items():
+            if column not in existing:
+                conn.execute(f"ALTER TABLE feedback ADD COLUMN {column} {column_type}")
+                logger.info("Added missing column to feedback: %s", column)
+
+        if "message" in existing:
+            conn.execute(
+                "UPDATE feedback SET text = message WHERE text IS NULL AND message IS NOT NULL"
+            )
+        conn.execute(
+            "UPDATE feedback SET meta_json = '{}' WHERE meta_json IS NULL"
+        )
+        conn.execute(
+            "UPDATE feedback SET ts = CAST(strftime('%s','now') AS INTEGER) WHERE ts IS NULL"
+        )
+
+    def _ensure_group_columns(self, conn: sqlite3.Connection) -> None:
+        cursor = conn.execute("PRAGMA table_info(groups)")
+        existing = {row[1] for row in cursor.fetchall()}
+        if not existing:
+            return
+        missing_columns = {
+            "enabled": "INTEGER NOT NULL DEFAULT 0",
+            "language": "TEXT NOT NULL DEFAULT 'en'",
+            "language_mode": "TEXT NOT NULL DEFAULT 'clean'",
+            "warn_threshold": "INTEGER NOT NULL DEFAULT 2",
+            "mute_threshold": "INTEGER NOT NULL DEFAULT 3",
+            "welcome_enabled": "INTEGER NOT NULL DEFAULT 0",
+            "rules_enabled": "INTEGER NOT NULL DEFAULT 0",
+            "security_enabled": "INTEGER NOT NULL DEFAULT 0",
+        }
+        for column, column_type in missing_columns.items():
+            if column not in existing:
+                conn.execute(f"ALTER TABLE groups ADD COLUMN {column} {column_type}")
+                logger.info("Added missing column to groups: %s", column)
 
     @contextmanager
     def _conn(self):
@@ -168,6 +270,12 @@ class DB:
                 params.append(user_id)
                 query = f"UPDATE users SET {', '.join(updates)} WHERE user_id = ?"
                 conn.execute(query, params)
+
+    def _ensure_group_conn(self, conn: sqlite3.Connection, group_id: int) -> None:
+        conn.execute(
+            "INSERT OR IGNORE INTO groups (group_id) VALUES (?)",
+            (group_id,),
+        )
 
     def ensure_user(
         self,
@@ -240,13 +348,199 @@ class DB:
                 (style, user_id),
             )
 
-    def add_feedback(self, user_id: int, message: str) -> None:
+    def set_language(self, user_id: int, language: str) -> None:
+        """Set preferred language for a user"""
+        with self._conn() as conn:
+            self._ensure_user_conn(conn, user_id)
+            conn.execute(
+                "UPDATE users SET language = ? WHERE user_id = ?",
+                (language, user_id),
+            )
+
+    def set_language_mode(self, user_id: int, language_mode: str) -> None:
+        """Set preferred language mode for a user"""
+        with self._conn() as conn:
+            self._ensure_user_conn(conn, user_id)
+            conn.execute(
+                "UPDATE users SET language_mode = ? WHERE user_id = ?",
+                (language_mode, user_id),
+            )
+
+    def ensure_group(self, group_id: int) -> None:
+        """Ensure group exists"""
+        with self._conn() as conn:
+            self._ensure_group_conn(conn, group_id)
+
+    def get_group(self, group_id: int) -> Dict[str, Any]:
+        """Get group settings"""
+        with self._conn() as conn:
+            self._ensure_group_conn(conn, group_id)
+            cursor = conn.execute(
+                "SELECT * FROM groups WHERE group_id = ?",
+                (group_id,),
+            )
+            row = cursor.fetchone()
+            return dict(row) if row else {}
+
+    def set_group_enabled(self, group_id: int, enabled: bool) -> None:
+        with self._conn() as conn:
+            self._ensure_group_conn(conn, group_id)
+            conn.execute(
+                "UPDATE groups SET enabled = ? WHERE group_id = ?",
+                (1 if enabled else 0, group_id),
+            )
+
+    def set_group_language(self, group_id: int, language: str) -> None:
+        with self._conn() as conn:
+            self._ensure_group_conn(conn, group_id)
+            conn.execute(
+                "UPDATE groups SET language = ? WHERE group_id = ?",
+                (language, group_id),
+            )
+
+    def set_group_language_mode(self, group_id: int, language_mode: str) -> None:
+        with self._conn() as conn:
+            self._ensure_group_conn(conn, group_id)
+            conn.execute(
+                "UPDATE groups SET language_mode = ? WHERE group_id = ?",
+                (language_mode, group_id),
+            )
+
+    def set_group_thresholds(self, group_id: int, warn_threshold: int, mute_threshold: int) -> None:
+        with self._conn() as conn:
+            self._ensure_group_conn(conn, group_id)
+            conn.execute(
+                "UPDATE groups SET warn_threshold = ?, mute_threshold = ? WHERE group_id = ?",
+                (warn_threshold, mute_threshold, group_id),
+            )
+
+    def set_group_toggle(self, group_id: int, field: str, enabled: bool) -> None:
+        if field not in {"welcome_enabled", "rules_enabled", "security_enabled"}:
+            raise ValueError("Invalid group toggle field")
+        with self._conn() as conn:
+            self._ensure_group_conn(conn, group_id)
+            conn.execute(
+                f"UPDATE groups SET {field} = ? WHERE group_id = ?",
+                (1 if enabled else 0, group_id),
+            )
+
+    def increment_violations(self, group_id: int, user_id: int, ts: int) -> int:
+        with self._conn() as conn:
+            conn.execute(
+                """
+                INSERT INTO group_user_state (group_id, user_id, violations, last_ts)
+                VALUES (?, ?, 1, ?)
+                ON CONFLICT(group_id, user_id)
+                DO UPDATE SET violations = violations + 1, last_ts = excluded.last_ts
+                """,
+                (group_id, user_id, ts),
+            )
+            cursor = conn.execute(
+                "SELECT violations FROM group_user_state WHERE group_id = ? AND user_id = ?",
+                (group_id, user_id),
+            )
+            row = cursor.fetchone()
+            return int(row["violations"]) if row else 0
+
+    def record_moderation_log(
+        self,
+        group_id: int,
+        user_id: int,
+        trigger: str,
+        decision_summary: str,
+        action: str,
+        meta_json: str,
+    ) -> None:
+        with self._conn() as conn:
+            conn.execute(
+                """
+                INSERT INTO moderation_log (ts, group_id, user_id, trigger, decision_summary, action, meta_json)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+                """,
+                (int(datetime.utcnow().timestamp()), group_id, user_id, trigger, decision_summary, action, meta_json),
+            )
+
+    def get_group_logs(self, group_id: int, limit: int = 20) -> List[Dict[str, Any]]:
+        with self._conn() as conn:
+            cursor = conn.execute(
+                """
+                SELECT * FROM moderation_log
+                WHERE group_id = ?
+                ORDER BY ts DESC
+                LIMIT ?
+                """,
+                (group_id, limit),
+            )
+            return [dict(row) for row in cursor.fetchall()]
+
+    def add_group_subscription(
+        self,
+        group_id: int,
+        plan_id: str,
+        stars_amount: int,
+        transaction_id: str,
+        start_ts: int,
+        end_ts: Optional[int],
+    ) -> bool:
+        with self._conn() as conn:
+            cursor = conn.execute(
+                """
+                INSERT OR IGNORE INTO group_subscriptions
+                (group_id, plan_id, stars_amount, transaction_id, start_ts, end_ts, status)
+                VALUES (?, ?, ?, ?, ?, ?, 'active')
+                """,
+                (group_id, plan_id, stars_amount, transaction_id, start_ts, end_ts),
+            )
+            return cursor.rowcount == 1
+
+    def group_subscription_active(self, group_id: int) -> bool:
+        now = int(datetime.utcnow().timestamp())
+        with self._conn() as conn:
+            cursor = conn.execute(
+                """
+                SELECT 1 FROM group_subscriptions
+                WHERE group_id = ?
+                AND status = 'active'
+                AND (end_ts IS NULL OR end_ts > ?)
+                ORDER BY start_ts DESC
+                LIMIT 1
+                """,
+                (group_id, now),
+            )
+            return cursor.fetchone() is not None
+
+    def get_group_subscription_info(self, group_id: int) -> Dict[str, Any]:
+        now = int(datetime.utcnow().timestamp())
+        with self._conn() as conn:
+            cursor = conn.execute(
+                """
+                SELECT * FROM group_subscriptions
+                WHERE group_id = ?
+                ORDER BY start_ts DESC
+                LIMIT 1
+                """,
+                (group_id,),
+            )
+            row = cursor.fetchone()
+            if not row:
+                return {"active": False, "end_ts": None, "plan_id": None}
+            data = dict(row)
+            active = data.get("status") == "active" and (
+                data.get("end_ts") is None or data.get("end_ts") > now
+            )
+            return {
+                "active": active,
+                "end_ts": data.get("end_ts"),
+                "plan_id": data.get("plan_id"),
+            }
+
+    def add_feedback(self, user_id: int, text: str, meta_json: str) -> None:
         """Record user feedback"""
         with self._conn() as conn:
             self._ensure_user_conn(conn, user_id)
             conn.execute(
-                "INSERT INTO feedback (user_id, message) VALUES (?, ?)",
-                (user_id, message),
+                "INSERT INTO feedback (ts, user_id, text, meta_json) VALUES (?, ?, ?, ?)",
+                (int(datetime.utcnow().timestamp()), user_id, text, meta_json),
             )
 
     def get_retry_flags(self, user_id: int) -> Dict[str, bool]:
@@ -405,11 +699,21 @@ class DB:
         try:
             with self._conn() as conn:
                 cursor = conn.execute(
-                    "SELECT name FROM sqlite_master WHERE type='table' AND name IN (?, ?, ?, ?, ?)",
-                    ("users", "retry_flags", "interactions", "purchases", "feedback"),
+                    "SELECT name FROM sqlite_master WHERE type='table' AND name IN (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    (
+                        "users",
+                        "retry_flags",
+                        "interactions",
+                        "purchases",
+                        "feedback",
+                        "groups",
+                        "group_user_state",
+                        "moderation_log",
+                        "group_subscriptions",
+                    ),
                 )
                 tables_found = {row["name"] for row in cursor.fetchall()}
-                return len(tables_found) == 5
+                return len(tables_found) == 9
         except Exception as exc:
             logger.error("Database health check failed: %s", exc)
             return False

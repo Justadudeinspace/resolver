@@ -24,6 +24,10 @@ class Settings(BaseSettings):
     # Payments security
     invoice_secret: str = Field(default="", alias="INVOICE_SECRET")
 
+    # Feature flags
+    feature_v2_personal: bool = Field(default=False, alias="FEATURE_V2_PERSONAL")
+    feature_v2_groups: bool = Field(default=False, alias="FEATURE_V2_GROUPS")
+
     # Logging
     log_level: str = Field(default="INFO", alias="LOG_LEVEL")
 
