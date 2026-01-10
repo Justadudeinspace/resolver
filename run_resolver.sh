@@ -46,6 +46,18 @@ read_env_value() {
     return 1
 }
 
+PLACEHOLDER_MARKERS=("CHANGE_ME" "YOUR_SECRET_HERE" "REPLACE_ME" "INSERT_SECRET" "EXAMPLE")
+
+is_placeholder_value() {
+    local value="$1"
+    for marker in "${PLACEHOLDER_MARKERS[@]}"; do
+        if [[ "$value" == *"$marker"* ]]; then
+            return 0
+        fi
+    done
+    return 1
+}
+
 run_with_timeout() {
     if command -v timeout &> /dev/null; then
         timeout 60 "$@"
@@ -76,7 +88,7 @@ if [ ! -f ".env" ]; then
 fi
 
 BOT_TOKEN="$(read_env_value "BOT_TOKEN" || true)"
-if [ -z "$BOT_TOKEN" ] || [[ "$BOT_TOKEN" == *"your_token_here"* ]]; then
+if [ -z "$BOT_TOKEN" ] || is_placeholder_value "$BOT_TOKEN"; then
     print_error "BOT_TOKEN is missing or still a placeholder."
     print_info "Edit .env and set BOT_TOKEN to your Telegram bot token, then re-run ./run_resolver.sh"
     exit 1
@@ -84,8 +96,7 @@ fi
 
 INVOICE_SECRET="$(read_env_value "INVOICE_SECRET" || true)"
 if [ -z "$INVOICE_SECRET" ] || [ "${#INVOICE_SECRET}" -lt 32 ] \
-    || [[ "$INVOICE_SECRET" == *"CHANGE_ME"* ]] \
-    || [[ "$INVOICE_SECRET" == *"generate_a_secure_random_string_here"* ]]; then
+    || is_placeholder_value "$INVOICE_SECRET"; then
     print_error "INVOICE_SECRET is missing, too short, or still a placeholder."
     print_info "Edit .env and set INVOICE_SECRET to a 32+ character random string, then re-run ./run_resolver.sh"
     exit 1
