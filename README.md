@@ -28,6 +28,8 @@ git clone https://github.com/Justadudeinspace/resolver.git
 cd resolver
 chmod +x install_resolver.sh
 ./install_resolver.sh
+# If .venv was created (default on Linux/macOS/WSL/proot), activate it:
+source .venv/bin/activate
 ```
 
 ### 2) Configure
@@ -46,6 +48,8 @@ cp .env.example .env
 pkg install git python3
 chmod +x install_resolver.sh
 ./install_resolver.sh
+# If .venv was created, activate it:
+source .venv/bin/activate
 ./run_resolver.sh
 ```
 
