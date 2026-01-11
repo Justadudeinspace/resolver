@@ -16,7 +16,7 @@ A Telegram bot that helps you say the right thing without escalating conversatio
 - **Close**: Direct, composed responses to end conversations cleanly
 - **Free tier**: 1 Stabilize resolve per day
 - **Paid tier**: All goals + paid resolves with one free retry after a paid resolve
-- **Payments**: Telegram Stars invoices (XTR) with signed payloads and verification
+- **Payments**: Telegram Stars invoices (XTR) with short invoice payloads stored in SQLite
 - **V2 Personal (opt-in)**: Language + language mode per user
 - **V2 Groups (opt-in)**: Admin-only group moderation with paid subscriptions
 
@@ -58,7 +58,6 @@ chmod +x install_resolver.sh
 - `RATE_LIMIT_PER_USER` - Requests per minute
 - `MAX_INPUT_LENGTH` - Max characters in input
 - `DB_PATH` - SQLite path (default: `./data/resolver.sqlite3`)
-- `INVOICE_SECRET` - 32+ char secret for signing invoice payloads
 - `FEATURE_V2_PERSONAL` - Enable v2 personal settings (`true`/`false`, default `false`)
 - `FEATURE_V2_GROUPS` - Enable v2 group moderation (`true`/`false`, default `false`)
 - `LOG_LEVEL` - Logging level (INFO, DEBUG, etc.)
@@ -76,6 +75,11 @@ V2 features are opt-in. If the flags are missing, they default to `false`.
 - The bot uses `currency="XTR"` and an empty `provider_token`.
 - Buttons open Telegram Stars invoices, and resolves are added only after `successful_payment` validation.
 - Group subscriptions use separate Stars plans and activate only after `successful_payment`.
+
+## Stars Invoice Payloads
+- The invoice payload is a short `invoice_id` (<= 128 bytes) stored in SQLite.
+- Invoice context (user, plan, amount, currency, status, timestamps) is persisted before sending the invoice.
+- Idempotency is enforced via `telegram_payment_charge_id` on successful payment handling.
 
 ## Core Flow
 1) `/start` → choose a goal

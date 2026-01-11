@@ -166,7 +166,7 @@ if [ ! -f ".env" ]; then
     if [ -f ".env.example" ]; then
         cp .env.example .env
         print_success "Created .env from template"
-        print_info "Edit .env with BOT_TOKEN, OPENAI_API_KEY, and INVOICE_SECRET"
+        print_info "Edit .env with BOT_TOKEN and OPENAI_API_KEY"
     else
         print_error ".env.example not found!"
         exit 1
@@ -187,5 +187,5 @@ print_success "INSTALLATION COMPLETE"
 
 echo ""
 echo "Next steps:"
-echo "1) Edit .env with your BOT_TOKEN and INVOICE_SECRET"
+echo "1) Edit .env with your BOT_TOKEN"
 echo "2) Start the bot: ./run_resolver.sh"

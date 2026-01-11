@@ -24,12 +24,10 @@ from .llm import llm_client
 from .payments import (
     GROUP_PLANS,
     PLANS,
-    create_group_sub_payload,
-    create_invoice_payload,
-    is_group_payload,
-    verify_and_parse_group_payload,
-    verify_and_parse_payload,
-    verify_stars_payment,
+    INVOICE_TTL_SECONDS,
+    build_group_plan_key,
+    generate_invoice_id,
+    parse_group_plan_key,
 )
 from .states import Flow
 from .texts import (
@@ -79,6 +77,26 @@ GROUP_TEMPLATES = {
     "permission": "⚠️ I need permission to mute members. Admins, please enable the restriction permission.",
     "notify_admins": "Admins notified: moderation action taken.",
 }
+
+
+def _create_invoice_record(
+    db: DB,
+    user_id: int,
+    plan_id: str,
+    amount: int,
+    currency: str = "XTR",
+) -> Optional[str]:
+    for _ in range(3):
+        invoice_id = generate_invoice_id()
+        if db.create_invoice(
+            invoice_id=invoice_id,
+            user_id=user_id,
+            plan_id=plan_id,
+            amount=amount,
+            currency=currency,
+        ):
+            return invoice_id
+    return None
 
 
 async def _edit_or_send(message: Message, text: str, reply_markup=None) -> None:
@@ -453,15 +471,20 @@ async def cmd_pricing(msg: Message):
 
 
 @router.message(Command("buy"))
-async def cmd_buy(msg: Message, command: CommandObject, bot: Bot):
+async def cmd_buy(msg: Message, command: CommandObject, bot: Bot, db: DB):
     plan_id = (command.args or "").strip().lower()
     if plan_id in PLANS:
-        payload = create_invoice_payload(msg.from_user.id, plan_id)
+        plan = PLANS[plan_id]
+        payload = _create_invoice_record(
+            db=db,
+            user_id=msg.from_user.id,
+            plan_id=plan.id,
+            amount=plan.stars,
+        )
         if not payload:
-            await msg.answer("Payments are not configured yet.")
+            await msg.answer("Failed to create invoice. Please try again.")
             return
 
-        plan = PLANS[plan_id]
         prices = [LabeledPrice(label=f"{plan.resolves} Resolves", amount=plan.stars * 100)]
         try:
             await bot.send_invoice(
@@ -955,9 +978,15 @@ async def groupadmin_handler(cb: CallbackQuery, bot: Bot, db: DB):
         if not plan:
             await cb.answer("Unknown plan.")
             return
-        payload = create_group_sub_payload(group_id, cb.from_user.id, plan_id)
+        plan_key = build_group_plan_key(plan_id, group_id)
+        payload = _create_invoice_record(
+            db=db,
+            user_id=cb.from_user.id,
+            plan_id=plan_key,
+            amount=plan.stars,
+        )
         if not payload:
-            await cb.answer("Payments are not configured yet.")
+            await cb.answer("Failed to create invoice. Please try again.")
             return
         prices = [LabeledPrice(label=f"Group Subscription {plan.name}", amount=plan.stars * 100)]
         try:
@@ -1068,7 +1097,7 @@ async def retry_apply_handler(cb: CallbackQuery, db: DB):
 
 
 @router.callback_query(F.data.startswith("buy:"))
-async def buy_handler(cb: CallbackQuery, bot: Bot):
+async def buy_handler(cb: CallbackQuery, bot: Bot, db: DB):
     plan_id = cb.data.split(":", 1)[1]
     plan = PLANS.get(plan_id)
 
@@ -1076,9 +1105,14 @@ async def buy_handler(cb: CallbackQuery, bot: Bot):
         await cb.answer("Invalid purchase option.")
         return
 
-    payload = create_invoice_payload(cb.from_user.id, plan_id)
+    payload = _create_invoice_record(
+        db=db,
+        user_id=cb.from_user.id,
+        plan_id=plan.id,
+        amount=plan.stars,
+    )
     if not payload:
-        await cb.answer("Payments are not configured yet.")
+        await cb.answer("Failed to create invoice. Please try again.")
         return
 
     prices = [LabeledPrice(label=f"{plan.resolves} Resolves", amount=plan.stars * 100)]
@@ -1215,44 +1249,64 @@ async def group_moderation_handler(msg: Message, bot: Bot, db: DB):
 async def pre_checkout(pre_checkout_query: PreCheckoutQuery, db: DB):
     try:
         payload = pre_checkout_query.invoice_payload
-        if is_group_payload(payload):
-            data = verify_and_parse_group_payload(payload)
-            if not data:
-                await pre_checkout_query.answer(ok=False, error_message="Invalid invoice")
+        invoice = db.get_invoice(payload)
+        if not invoice:
+            await pre_checkout_query.answer(
+                ok=False, error_message="Invoice expired or invalid. Please try again."
+            )
+            return
+
+        if invoice["status"] != "created":
+            await pre_checkout_query.answer(
+                ok=False, error_message="Invoice expired or invalid. Please try again."
+            )
+            return
+
+        if int(invoice["user_id"]) != pre_checkout_query.from_user.id:
+            await pre_checkout_query.answer(
+                ok=False, error_message="Invoice expired or invalid. Please try again."
+            )
+            return
+
+        now = int(time.time())
+        if now - int(invoice["created_at"]) > INVOICE_TTL_SECONDS:
+            await pre_checkout_query.answer(
+                ok=False, error_message="Invoice expired or invalid. Please try again."
+            )
+            return
+
+        if pre_checkout_query.currency != invoice["currency"]:
+            await pre_checkout_query.answer(
+                ok=False, error_message="Invoice expired or invalid. Please try again."
+            )
+            return
+
+        if pre_checkout_query.total_amount // 100 != int(invoice["amount"]):
+            await pre_checkout_query.answer(
+                ok=False, error_message="Invoice expired or invalid. Please try again."
+            )
+            return
+
+        group_info = parse_group_plan_key(str(invoice["plan_id"]))
+        if group_info:
+            plan = GROUP_PLANS.get(group_info["plan_id"])
+            if not plan or plan.stars != int(invoice["amount"]):
+                await pre_checkout_query.answer(
+                    ok=False, error_message="Invoice expired or invalid. Please try again."
+                )
                 return
-            if int(data["uid"]) != pre_checkout_query.from_user.id:
-                await pre_checkout_query.answer(ok=False, error_message="Invalid invoice")
-                return
-            plan = GROUP_PLANS.get(data["plan"])
-            if not plan:
-                await pre_checkout_query.answer(ok=False, error_message="Invalid plan")
-                return
-            if pre_checkout_query.total_amount // 100 != plan.stars:
-                await pre_checkout_query.answer(ok=False, error_message="Invalid payment amount")
-                return
-            db.ensure_group(int(data["gid"]))
+            db.ensure_group(int(group_info["group_id"]))
             await pre_checkout_query.answer(ok=True)
             return
 
-        data = verify_and_parse_payload(payload)
-        if not data:
-            await pre_checkout_query.answer(ok=False, error_message="Invalid invoice")
+        plan = PLANS.get(str(invoice["plan_id"]))
+        if not plan or plan.stars != int(invoice["amount"]):
+            await pre_checkout_query.answer(
+                ok=False, error_message="Invoice expired or invalid. Please try again."
+            )
             return
 
-        if int(data["uid"]) != pre_checkout_query.from_user.id:
-            await pre_checkout_query.answer(ok=False, error_message="Invalid invoice")
-            return
-
-        plan = PLANS.get(data["plan"])
-        if not plan:
-            await pre_checkout_query.answer(ok=False, error_message="Invalid plan")
-            return
-
-        if pre_checkout_query.total_amount // 100 != plan.stars:
-            await pre_checkout_query.answer(ok=False, error_message="Invalid payment amount")
-            return
-
-        db.ensure_user(data["uid"])
+        db.ensure_user(int(invoice["user_id"]))
         await pre_checkout_query.answer(ok=True)
     except Exception as exc:
         logger.error("Pre-checkout error: %s", exc)
@@ -1264,78 +1318,98 @@ async def successful_payment(msg: Message, db: DB):
     payment = msg.successful_payment
 
     try:
+        invoice_id = payment.invoice_payload
+        invoice = db.get_invoice(invoice_id)
+        if not invoice:
+            logger.warning("Payment received for unknown invoice %s", invoice_id)
+            await msg.answer("Payment verification failed. Please contact support.")
+            return
+
+        if int(invoice["user_id"]) != msg.from_user.id:
+            await msg.answer("Payment verification failed. Please contact support.")
+            return
+
+        group_info = parse_group_plan_key(str(invoice["plan_id"]))
+        if invoice["status"] != "created":
+            if group_info:
+                await msg.answer("Payment already processed! Your group subscription is active.")
+                return
+            await msg.answer("Payment already processed! Your resolves are available.")
+            return
+
+        now = int(time.time())
+        if now - int(invoice["created_at"]) > INVOICE_TTL_SECONDS:
+            await msg.answer("Payment verification failed. Please contact support.")
+            return
+
         stars_paid = payment.total_amount // 100
-        if is_group_payload(payment.invoice_payload):
-            data = verify_and_parse_group_payload(payment.invoice_payload)
-            if not data:
-                logger.warning("Invalid group payment received from user %s", msg.from_user.id)
-                await msg.answer("Payment verification failed. Please contact support.")
-                return
-            if int(data["uid"]) != msg.from_user.id:
-                await msg.answer("Payment verification failed. Please contact support.")
-                return
-            plan = GROUP_PLANS.get(data["plan"])
+        if stars_paid != int(invoice["amount"]):
+            await msg.answer("Payment verification failed. Please contact support.")
+            return
+
+        if group_info:
+            plan = GROUP_PLANS.get(group_info["plan_id"])
             if not plan or plan.stars != stars_paid:
                 logger.error("Group plan mismatch in payment")
                 await msg.answer("Payment processing error. Please contact support.")
                 return
+
             transaction_id = payment.telegram_payment_charge_id
             start_ts = int(time.time())
             end_ts = (
                 start_ts + plan.duration_days * 86400 if plan.duration_days is not None else None
             )
-            success = db.add_group_subscription(
-                group_id=int(data["gid"]),
+            status = db.process_group_invoice_payment(
+                invoice_id=invoice_id,
+                telegram_charge_id=transaction_id,
+                group_id=int(group_info["group_id"]),
                 plan_id=plan.id,
                 stars_amount=plan.stars,
-                transaction_id=transaction_id,
                 start_ts=start_ts,
                 end_ts=end_ts,
             )
-            if not success:
+            if status == "duplicate":
                 await msg.answer("Payment already processed! Your group subscription is active.")
                 return
+            if status != "processed":
+                await msg.answer("Payment processing error. Please contact support.")
+                return
+
             await msg.answer(
                 f"✅ Group subscription activated: {plan.name}.\n"
-                f"Group ID: {data['gid']}\n"
+                f"Group ID: {group_info['group_id']}\n"
                 f"Expires: {_format_expiry(end_ts)}"
             )
             charge_id_prefix = transaction_id[-6:] if transaction_id else "unknown"
             logger.info(
                 "Group payment processed: gid=%s, uid=%s, plan=%s, charge_id_suffix=%s",
-                data["gid"],
+                group_info["group_id"],
                 msg.from_user.id,
                 plan.id,
                 charge_id_prefix,
             )
             return
 
-        data = verify_stars_payment(stars_paid, payment.invoice_payload)
-        if not data:
-            logger.warning("Invalid payment received from user %s", msg.from_user.id)
-            await msg.answer("Payment verification failed. Please contact support.")
-            return
-
-        if int(data["uid"]) != msg.from_user.id:
-            await msg.answer("Payment verification failed. Please contact support.")
-            return
-
-        plan = PLANS.get(data["plan"])
+        plan = PLANS.get(str(invoice["plan_id"]))
         if not plan:
             logger.error("Unknown plan in payment")
             await msg.answer("Payment processing error. Please contact support.")
             return
 
         transaction_id = payment.telegram_payment_charge_id
-        success = db.add_resolves(
+        status = db.process_invoice_payment(
+            invoice_id=invoice_id,
+            telegram_charge_id=transaction_id,
             user_id=msg.from_user.id,
             stars_amount=plan.stars,
             resolves_added=plan.resolves,
-            transaction_id=transaction_id,
         )
 
-        if not success:
+        if status == "duplicate":
             await msg.answer("Payment already processed! Your resolves are available.")
+            return
+        if status != "processed":
+            await msg.answer("Payment processing error. Please contact support.")
             return
 
         user = db.get_user(msg.from_user.id)
