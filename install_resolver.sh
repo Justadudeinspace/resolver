@@ -416,11 +416,34 @@ install_python_deps() {
     current_hash="$(requirements_hash)"
     local deps_missing="false"
 
+    "$VENV_PYTHON" -c "import importlib; print('importlib from:', getattr(importlib,'__file__', 'built-in'))"
+
     if ! "$VENV_PYTHON" - <<'PY'
 import sys
-import importlib
-required = ["pydantic","pydantic_settings","aiogram","dotenv","openai","httpx","cryptography","aiosqlite"]
-missing = [m for m in required if importlib.util.find_spec(m) is None]
+try:
+    from importlib.util import find_spec
+except Exception:
+    find_spec = None
+
+required = [
+  "pydantic",
+  "pydantic_settings",
+  "aiogram",
+  "dotenv",
+  "openai",
+  "httpx",
+  "cryptography",
+  "aiosqlite",
+]
+
+missing = []
+if find_spec is not None:
+    for m in required:
+        if find_spec(m) is None:
+            missing.append(m)
+else:
+    missing = list(required)
+
 print("missing:", missing)
 sys.exit(1 if missing else 0)
 PY
