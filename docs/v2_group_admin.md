@@ -17,6 +17,7 @@ The panel uses message editing and always reflects the current DB state.
 
 Controls:
 - Enable / Disable Resolver
+- RAG query panel (admin-only)
 - Set language
 - Set language mode (Clean / Adult / Unrestricted)
 - Configure escalation thresholds (warn / mute)
@@ -59,3 +60,5 @@ Rules:
 
 ## Logs
 - `/grouplogs` shows the last 20 moderation actions for admins.
+- RAG queries use audit records only (no raw chat history).
+- Each RAG response cites audit IDs for traceability and optional detail views.

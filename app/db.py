@@ -3,6 +3,7 @@ import logging
 import os
 import sqlite3
 import time
+import uuid
 from contextlib import contextmanager
 from datetime import date, datetime
 from typing import Optional, Dict, Any, List
@@ -121,6 +122,24 @@ CREATE TABLE IF NOT EXISTS invoices (
     status TEXT NOT NULL,
     created_at INTEGER NOT NULL,
     telegram_charge_id TEXT UNIQUE
+);
+
+CREATE TABLE IF NOT EXISTS audit_events (
+    event_id TEXT PRIMARY KEY,
+    ts INTEGER NOT NULL,
+    chat_id INTEGER NOT NULL,
+    actor_user_id INTEGER NOT NULL,
+    target_user_id INTEGER,
+    action TEXT NOT NULL,
+    reason TEXT,
+    metadata_json TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS audit_embeddings (
+    event_id TEXT PRIMARY KEY,
+    embedding_json TEXT NOT NULL,
+    created_at INTEGER NOT NULL,
+    FOREIGN KEY(event_id) REFERENCES audit_events(event_id)
 );
 """
 
@@ -520,6 +539,138 @@ class DB:
                 (group_id, limit),
             )
             return [dict(row) for row in cursor.fetchall()]
+
+    def record_audit_event(
+        self,
+        chat_id: int,
+        actor_user_id: int,
+        action: str,
+        target_user_id: Optional[int] = None,
+        reason: Optional[str] = None,
+        metadata: Optional[Dict[str, Any]] = None,
+    ) -> str:
+        event_id = str(uuid.uuid4())
+        meta_json = json.dumps(metadata or {}, ensure_ascii=False)
+        with self._conn() as conn:
+            conn.execute(
+                """
+                INSERT INTO audit_events
+                (event_id, ts, chat_id, actor_user_id, target_user_id, action, reason, metadata_json)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    event_id,
+                    int(datetime.utcnow().timestamp()),
+                    chat_id,
+                    actor_user_id,
+                    target_user_id,
+                    action,
+                    reason,
+                    meta_json,
+                ),
+            )
+        return event_id
+
+    def get_audit_event(self, chat_id: int, event_id: str) -> Optional[Dict[str, Any]]:
+        with self._conn() as conn:
+            cursor = conn.execute(
+                """
+                SELECT * FROM audit_events
+                WHERE chat_id = ? AND event_id = ?
+                """,
+                (chat_id, event_id),
+            )
+            row = cursor.fetchone()
+            return dict(row) if row else None
+
+    def get_audit_events(
+        self,
+        chat_id: int,
+        since_ts: Optional[int] = None,
+        action_filter: Optional[str] = None,
+        limit: int = 200,
+    ) -> List[Dict[str, Any]]:
+        params: List[Any] = [chat_id]
+        conditions = ["chat_id = ?"]
+        if since_ts is not None:
+            conditions.append("ts >= ?")
+            params.append(since_ts)
+        if action_filter:
+            conditions.append("action = ?")
+            params.append(action_filter)
+
+        where_clause = " AND ".join(conditions)
+        query = (
+            "SELECT * FROM audit_events "
+            f"WHERE {where_clause} "
+            "ORDER BY ts DESC LIMIT ?"
+        )
+        params.append(limit)
+        with self._conn() as conn:
+            cursor = conn.execute(query, params)
+            return [dict(row) for row in cursor.fetchall()]
+
+    def search_audit_events(
+        self,
+        chat_id: int,
+        query_text: str,
+        since_ts: Optional[int] = None,
+        action_filter: Optional[str] = None,
+        limit: int = 200,
+    ) -> List[Dict[str, Any]]:
+        tokens = [token for token in query_text.lower().split() if token]
+        if not tokens:
+            return self.get_audit_events(chat_id, since_ts=since_ts, action_filter=action_filter, limit=limit)
+
+        params: List[Any] = [chat_id]
+        conditions = ["chat_id = ?"]
+        if since_ts is not None:
+            conditions.append("ts >= ?")
+            params.append(since_ts)
+        if action_filter:
+            conditions.append("action = ?")
+            params.append(action_filter)
+
+        like_clauses = []
+        for token in tokens[:5]:
+            like_clauses.append("(action LIKE ? OR reason LIKE ? OR metadata_json LIKE ?)")
+            pattern = f"%{token}%"
+            params.extend([pattern, pattern, pattern])
+        where_clause = " AND ".join(conditions + [f"({' OR '.join(like_clauses)})"])
+        query = (
+            "SELECT * FROM audit_events "
+            f"WHERE {where_clause} "
+            "ORDER BY ts DESC LIMIT ?"
+        )
+        params.append(limit)
+        with self._conn() as conn:
+            cursor = conn.execute(query, params)
+            return [dict(row) for row in cursor.fetchall()]
+
+    def get_audit_embeddings(self, event_ids: List[str]) -> Dict[str, List[float]]:
+        if not event_ids:
+            return {}
+        placeholders = ",".join("?" for _ in event_ids)
+        query = f"SELECT event_id, embedding_json FROM audit_embeddings WHERE event_id IN ({placeholders})"
+        with self._conn() as conn:
+            cursor = conn.execute(query, event_ids)
+            results = {}
+            for row in cursor.fetchall():
+                try:
+                    results[row["event_id"]] = json.loads(row["embedding_json"])
+                except json.JSONDecodeError:
+                    continue
+            return results
+
+    def add_audit_embedding(self, event_id: str, embedding: List[float]) -> None:
+        with self._conn() as conn:
+            conn.execute(
+                """
+                INSERT OR IGNORE INTO audit_embeddings (event_id, embedding_json, created_at)
+                VALUES (?, ?, ?)
+                """,
+                (event_id, json.dumps(embedding), int(time.time())),
+            )
 
     def add_group_subscription(
         self,

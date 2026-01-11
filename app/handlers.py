@@ -2,6 +2,7 @@ import json
 import logging
 import re
 import time
+import traceback
 from datetime import datetime, timedelta
 from collections import defaultdict, deque
 from typing import Optional
@@ -46,6 +47,13 @@ from .texts import (
     render_options,
     FEEDBACK_PROMPT,
     FEEDBACK_THANKS,
+)
+from .rag import (
+    retrieve_audit_events,
+    build_rag_answer,
+    build_audit_detail,
+    RAG_WINDOWS,
+    RAG_ACTION_FILTERS,
 )
 
 logger = logging.getLogger(__name__)
@@ -132,8 +140,19 @@ async def _pre_checkout_fail(pre_checkout_query: PreCheckoutQuery, reason: str) 
 async def _edit_or_send(message: Message, text: str, reply_markup=None) -> None:
     try:
         await message.edit_text(text, reply_markup=reply_markup)
-    except TelegramBadRequest:
-        await message.answer(text, reply_markup=reply_markup)
+    except TelegramBadRequest as exc:
+        if "message is not modified" in str(exc).lower():
+            return
+        try:
+            await message.answer(text, reply_markup=reply_markup)
+        except Exception:
+            logger.error("Failed to send fallback message:\n%s", traceback.format_exc())
+    except Exception:
+        logger.error("Failed to edit message:\n%s", traceback.format_exc())
+        try:
+            await message.answer(text, reply_markup=reply_markup)
+        except Exception:
+            logger.error("Failed to send fallback message:\n%s", traceback.format_exc())
 
 
 async def _edit_message(message: Message, text: str, reply_markup=None) -> None:
@@ -143,6 +162,16 @@ async def _edit_message(message: Message, text: str, reply_markup=None) -> None:
         if "message is not modified" in str(exc).lower():
             return
         logger.warning("Failed to edit message: %s", exc)
+        try:
+            await message.answer(text, reply_markup=reply_markup)
+        except Exception:
+            logger.error("Failed to send fallback message:\n%s", traceback.format_exc())
+    except Exception:
+        logger.error("Failed to edit message:\n%s", traceback.format_exc())
+        try:
+            await message.answer(text, reply_markup=reply_markup)
+        except Exception:
+            logger.error("Failed to send fallback message:\n%s", traceback.format_exc())
 
 
 def _fallback_notice() -> str:
@@ -293,6 +322,7 @@ def kb_groupadmin(group: dict, subscription_info: dict, feature_enabled: bool):
         text="✅ Enable" if not enabled else "🚫 Disable",
         callback_data="ga:toggle_enabled",
     )
+    b.button(text="🔎 RAG Query", callback_data="ga:menu:rag")
     b.button(text="🌐 Language", callback_data="ga:menu:language")
     b.button(text="🧭 Mode", callback_data="ga:menu:mode")
     b.button(text=f"Warn threshold ({group.get('warn_threshold')})", callback_data="ga:menu:warn")
@@ -324,7 +354,30 @@ def kb_groupadmin(group: dict, subscription_info: dict, feature_enabled: bool):
             callback_data="ga:buy:group_lifetime",
         )
     b.button(text=f"{EMOJIS['back']} Close", callback_data="ga:menu:close")
-    b.adjust(2, 2, 2, 2, 2, 1)
+    b.adjust(2, 2, 2, 2, 2, 2, 1)
+    return b.as_markup()
+
+
+def kb_group_rag_menu(window_key: str, filter_key: str):
+    b = InlineKeyboardBuilder()
+    window_labels = {
+        "24h": "🕒 Last 24h",
+        "7d": "📅 Last 7d",
+    }
+    filter_labels = {
+        "incidents": "🚨 Incidents",
+        "mutes": "🔇 Mutes",
+        "warnings": "⚠️ Warnings",
+    }
+    for key in ("24h", "7d"):
+        prefix = "✅ " if window_key == key else ""
+        b.button(text=f"{prefix}{window_labels[key]}", callback_data=f"ga:rag:window:{key}")
+    for key in ("incidents", "mutes", "warnings"):
+        prefix = "✅ " if filter_key == key else ""
+        b.button(text=f"{prefix}{filter_labels[key]}", callback_data=f"ga:rag:filter:{key}")
+    b.button(text="❓ Ask a question", callback_data="ga:rag:ask")
+    b.button(text=f"{EMOJIS['back']} Back", callback_data="ga:menu:main")
+    b.adjust(2, 3, 1, 1)
     return b.as_markup()
 
 
@@ -963,7 +1016,7 @@ async def cmd_grouplogs(msg: Message, bot: Bot, db: DB):
 
 
 @router.callback_query(F.data.startswith("ga:"))
-async def groupadmin_handler(cb: CallbackQuery, bot: Bot, db: DB):
+async def groupadmin_handler(cb: CallbackQuery, bot: Bot, db: DB, state: FSMContext):
     if not cb.message:
         await cb.answer()
         return
@@ -1026,24 +1079,64 @@ async def groupadmin_handler(cb: CallbackQuery, bot: Bot, db: DB):
         )
         await cb.answer()
         return
+    if action == "menu:rag":
+        data = await state.get_data()
+        window_key = data.get("rag_window", "24h")
+        filter_key = data.get("rag_filter", "incidents")
+        await _edit_message(
+            cb.message,
+            "Ask a question about this group's moderation history.",
+            reply_markup=kb_group_rag_menu(window_key, filter_key),
+        )
+        await cb.answer()
+        return
     if action == "toggle_enabled":
-        db.set_group_enabled(group_id, not bool(group.get("enabled")))
+        current = bool(group.get("enabled"))
+        db.set_group_enabled(group_id, not current)
+        db.record_audit_event(
+            chat_id=group_id,
+            actor_user_id=cb.from_user.id,
+            action="group_setting_toggle",
+            reason="enabled",
+            metadata={"field": "enabled", "old": current, "new": not current},
+        )
     elif action.startswith("toggle:"):
         field = action.split(":", 1)[1]
         current = bool(group.get(field))
         db.set_group_toggle(group_id, field, not current)
+        db.record_audit_event(
+            chat_id=group_id,
+            actor_user_id=cb.from_user.id,
+            action="group_setting_toggle",
+            reason=field,
+            metadata={"field": field, "old": current, "new": not current},
+        )
     elif action.startswith("lang:"):
         language = action.split(":", 1)[1]
         if language not in SUPPORTED_LANGUAGES:
             await cb.answer("Unknown language.")
             return
         db.set_group_language(group_id, language)
+        db.record_audit_event(
+            chat_id=group_id,
+            actor_user_id=cb.from_user.id,
+            action="group_setting_update",
+            reason="language",
+            metadata={"field": "language", "old": group.get("language"), "new": language},
+        )
     elif action.startswith("mode:"):
         mode = action.split(":", 1)[1]
         if mode not in LANGUAGE_MODES:
             await cb.answer("Unknown mode.")
             return
         db.set_group_language_mode(group_id, mode)
+        db.record_audit_event(
+            chat_id=group_id,
+            actor_user_id=cb.from_user.id,
+            action="group_setting_update",
+            reason="language_mode",
+            metadata={"field": "language_mode", "old": group.get("language_mode"), "new": mode},
+        )
     elif action.startswith("warn:"):
         try:
             value = int(action.split(":", 1)[1])
@@ -1055,6 +1148,17 @@ async def groupadmin_handler(cb: CallbackQuery, bot: Bot, db: DB):
             await cb.answer("Warn threshold must be less than mute threshold.")
             return
         db.set_group_thresholds(group_id, value, mute_threshold)
+        db.record_audit_event(
+            chat_id=group_id,
+            actor_user_id=cb.from_user.id,
+            action="group_setting_update",
+            reason="warn_threshold",
+            metadata={
+                "field": "warn_threshold",
+                "old": group.get("warn_threshold"),
+                "new": value,
+            },
+        )
     elif action.startswith("mute:"):
         try:
             value = int(action.split(":", 1)[1])
@@ -1066,6 +1170,80 @@ async def groupadmin_handler(cb: CallbackQuery, bot: Bot, db: DB):
             await cb.answer("Mute threshold must be greater than warn threshold.")
             return
         db.set_group_thresholds(group_id, warn_threshold, value)
+        db.record_audit_event(
+            chat_id=group_id,
+            actor_user_id=cb.from_user.id,
+            action="group_setting_update",
+            reason="mute_threshold",
+            metadata={
+                "field": "mute_threshold",
+                "old": group.get("mute_threshold"),
+                "new": value,
+            },
+        )
+    elif action.startswith("rag:window:"):
+        window_key = action.split(":", 2)[2]
+        if window_key not in RAG_WINDOWS:
+            await cb.answer("Unknown window.")
+            return
+        data = await state.get_data()
+        filter_key = data.get("rag_filter", "incidents")
+        await state.update_data(rag_window=window_key)
+        await _edit_message(
+            cb.message,
+            "Ask a question about this group's moderation history.",
+            reply_markup=kb_group_rag_menu(window_key, filter_key),
+        )
+        await cb.answer("Updated window.")
+        return
+    elif action.startswith("rag:filter:"):
+        filter_key = action.split(":", 2)[2]
+        if filter_key not in RAG_ACTION_FILTERS:
+            await cb.answer("Unknown filter.")
+            return
+        data = await state.get_data()
+        window_key = data.get("rag_window", "24h")
+        await state.update_data(rag_filter=filter_key)
+        await _edit_message(
+            cb.message,
+            "Ask a question about this group's moderation history.",
+            reply_markup=kb_group_rag_menu(window_key, filter_key),
+        )
+        await cb.answer("Updated filter.")
+        return
+    elif action == "rag:ask":
+        data = await state.get_data()
+        window_key = data.get("rag_window", "24h")
+        filter_key = data.get("rag_filter", "incidents")
+        await state.update_data(
+            rag_group_id=group_id,
+            rag_window=window_key,
+            rag_filter=filter_key,
+        )
+        await state.set_state(Flow.waiting_for_group_rag)
+        await _edit_message(
+            cb.message,
+            "Send your moderation history question as a message.",
+            reply_markup=kb_group_rag_menu(window_key, filter_key),
+        )
+        await cb.answer()
+        return
+    elif action.startswith("rag:details:"):
+        event_id = action.split(":", 2)[2]
+        event = db.get_audit_event(group_id, event_id)
+        if not event:
+            await cb.answer("Audit record not found.")
+            return
+        data = await state.get_data()
+        window_key = data.get("rag_window", "24h")
+        filter_key = data.get("rag_filter", "incidents")
+        await _edit_message(
+            cb.message,
+            build_audit_detail(event),
+            reply_markup=kb_group_rag_menu(window_key, filter_key),
+        )
+        await cb.answer()
+        return
     elif action.startswith("buy:"):
         plan_id = action.split(":", 1)[1]
         plan = GROUP_PLANS.get(plan_id)
@@ -1111,6 +1289,13 @@ async def groupadmin_handler(cb: CallbackQuery, bot: Bot, db: DB):
                 protect_content=False,
             )
             await cb.answer("I sent you the Stars invoice in your DM.")
+            db.record_audit_event(
+                chat_id=group_id,
+                actor_user_id=cb.from_user.id,
+                action="subscription_invoice_created",
+                reason=plan_id,
+                metadata={"plan_id": plan_id, "stars": plan.stars},
+            )
         except Exception as exc:
             logger.error("Failed to send group invoice: %s", exc)
             await cb.answer("Failed to create invoice. Please try again.")
@@ -1127,6 +1312,68 @@ async def groupadmin_handler(cb: CallbackQuery, bot: Bot, db: DB):
         reply_markup=kb_groupadmin(group, subscription_info, settings.feature_v2_groups),
     )
     await cb.answer("Saved.")
+
+
+@router.message(Flow.waiting_for_group_rag)
+async def on_group_rag_query(msg: Message, state: FSMContext, bot: Bot, db: DB):
+    if msg.chat.type not in {"group", "supergroup"}:
+        await msg.answer("This query can only be used in groups.")
+        return
+    if not await is_group_admin(bot, msg.chat.id, msg.from_user.id):
+        await msg.answer("This command is restricted to group admins.")
+        return
+    if not msg.text:
+        await msg.answer("Please send your question as text.")
+        return
+
+    data = await state.get_data()
+    window_key = data.get("rag_window", "24h")
+    filter_key = data.get("rag_filter", "incidents")
+    query = msg.text.strip()
+    if not query:
+        await msg.answer("Please send your question as text.")
+        return
+
+    try:
+        db.record_audit_event(
+            chat_id=msg.chat.id,
+            actor_user_id=msg.from_user.id,
+            action="rag_query",
+            reason="admin_query",
+            metadata={"query": query[:200], "window": window_key, "filter": filter_key},
+        )
+        events = await retrieve_audit_events(
+            db=db,
+            chat_id=msg.chat.id,
+            query=query,
+            window_key=window_key,
+            action_filter_key=filter_key,
+            top_k=5,
+        )
+        answer = await build_rag_answer(query, events)
+        markup = None
+        if events:
+            b = InlineKeyboardBuilder()
+            for event in events:
+                short_id = str(event["event_id"]).split("-")[0]
+                b.button(text=f"Details {short_id}", callback_data=f"ga:rag:details:{event['event_id']}")
+            b.button(text=f"{EMOJIS['back']} Back", callback_data="ga:menu:rag")
+            b.adjust(2)
+            markup = b.as_markup()
+        if events:
+            db.record_audit_event(
+                chat_id=msg.chat.id,
+                actor_user_id=msg.from_user.id,
+                action="rag_answer",
+                reason="admin_query",
+                metadata={"result_ids": [event["event_id"] for event in events]},
+            )
+        await msg.answer(answer, reply_markup=markup)
+    except Exception:
+        logger.error("RAG query failed:\n%s", traceback.format_exc())
+        await msg.answer(ERROR_MESSAGES["generic"])
+    finally:
+        await state.clear()
 
 
 @router.callback_query(F.data == "retry:menu")
@@ -1357,6 +1604,14 @@ async def group_moderation_handler(msg: Message, bot: Bot, db: DB):
         action=action_taken,
         meta_json=meta_json,
     )
+    db.record_audit_event(
+        chat_id=group_id,
+        actor_user_id=bot.id,
+        target_user_id=msg.from_user.id,
+        action=action_taken,
+        reason=trigger,
+        metadata=json.loads(meta_json),
+    )
 
 
 @router.pre_checkout_query()
@@ -1571,3 +1826,9 @@ async def unknown_message(msg: Message):
     if msg.chat.type != "private":
         return
     await msg.answer(render_unknown_commands(), reply_markup=kb_goals())
+
+
+@router.callback_query()
+async def unknown_callback(cb: CallbackQuery):
+    logger.warning("Unhandled callback: %s", cb.data)
+    await cb.answer("Unknown action.")

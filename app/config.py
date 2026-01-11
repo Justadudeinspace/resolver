@@ -16,6 +16,7 @@ class Settings(BaseSettings):
     openai_api_key: Optional[str] = Field(default=None, alias="OPENAI_API_KEY")
     llm_model: str = Field(default="gpt-4o-mini", alias="LLM_MODEL")
     llm_temperature: float = Field(default=0.4, alias="LLM_TEMPERATURE")
+    embedding_model: str = Field(default="text-embedding-3-small", alias="EMBEDDING_MODEL")
 
     # Rate limiting
     rate_limit_per_user: int = Field(default=5, alias="RATE_LIMIT_PER_USER")

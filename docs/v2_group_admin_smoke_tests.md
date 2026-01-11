@@ -26,6 +26,10 @@
 - Send a triggering message from a non-admin.
 - Expect: De-escalation response, warn/mute ladder, and log entry.
 
-7) v1.0 DM features unaffected
+7) RAG query works for admins
+- From `/groupadmin`, open the RAG query panel and ask a question.
+- Expect: Summary response with audit ID citations and “Details” buttons.
+
+8) v1.0 DM features unaffected
 - In DM, run `/resolve`, `/pricing`, `/account`, `/settings`.
 - Expect: DM flows behave as before.
