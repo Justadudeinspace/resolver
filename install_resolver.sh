@@ -348,38 +348,24 @@ setup_python_env() {
     VENV_PYTHON="$PY_BIN"
     USE_VENV="false"
 
-    if [ "$ENVIRONMENT" = "TERMUX" ]; then
-        if [ -d "$VENV_DIR" ]; then
-            if [ -x "$VENV_DIR/bin/python" ]; then
-                USE_VENV="true"
-                VENV_PYTHON="$VENV_DIR/bin/python"
-            else
-                print_warning "Existing virtual environment is invalid; removing."
-                rm -rf "$VENV_DIR"
-            fi
-        fi
-
-        if [ "$USE_VENV" = "false" ]; then
-            if "$PY_BIN" -m venv "$VENV_DIR" >/dev/null 2>&1; then
-                if [ -x "$VENV_DIR/bin/python" ]; then
-                    USE_VENV="true"
-                    VENV_PYTHON="$VENV_DIR/bin/python"
-                    print_info "Virtual environment created in Termux."
-                else
-                    rm -rf "$VENV_DIR"
-                fi
-            else
-                rm -rf "$VENV_DIR"
-                print_warning "Termux venv unavailable; falling back to user installs."
-            fi
-        fi
-    else
-        if [ ! -d "$VENV_DIR" ]; then
-            "$PY_BIN" -m venv "$VENV_DIR"
-        fi
+    if [ -d "$VENV_DIR" ]; then
         if [ -x "$VENV_DIR/bin/python" ]; then
             USE_VENV="true"
             VENV_PYTHON="$VENV_DIR/bin/python"
+        else
+            print_warning "Existing virtual environment is invalid; removing."
+            rm -rf "$VENV_DIR"
+        fi
+    fi
+
+    if [ "$USE_VENV" = "false" ]; then
+        "$PY_BIN" -m venv "$VENV_DIR"
+        if [ -x "$VENV_DIR/bin/python" ]; then
+            USE_VENV="true"
+            VENV_PYTHON="$VENV_DIR/bin/python"
+            if [ "$ENVIRONMENT" = "TERMUX" ]; then
+                print_info "Virtual environment created in Termux."
+            fi
         else
             print_error "Virtual environment creation failed."
             exit 1
@@ -408,16 +394,18 @@ install_python_deps() {
         exit 1
     fi
 
-    local pip_cmd
-    if [ "$USE_VENV" = "true" ]; then
-        if ! "$VENV_PYTHON" -m pip install -U pip; then
-            print_error "Failed to upgrade pip in the virtual environment."
-            exit 1
-        fi
-        pip_cmd=("$VENV_PYTHON" -m pip install -r requirements.txt)
-    else
-        pip_cmd=("$PY_BIN" -m pip install --user -r requirements.txt)
+    if [ "$USE_VENV" != "true" ]; then
+        print_error "Virtual environment not available; cannot install dependencies."
+        exit 1
     fi
+
+    if ! "$VENV_PYTHON" -m pip install -U pip; then
+        print_error "Failed to upgrade pip in the virtual environment."
+        exit 1
+    fi
+
+    local pip_cmd
+    pip_cmd=("$VENV_PYTHON" -m pip install -r requirements.txt)
 
     local log_dir="logs"
     local log_file="${log_dir}/install_requirements.log"
@@ -426,8 +414,22 @@ install_python_deps() {
     local marker_file=".requirements.hash"
     local current_hash
     current_hash="$(requirements_hash)"
+    local deps_missing="false"
 
-    if [ -n "$current_hash" ] && [ -f "$marker_file" ]; then
+    if ! "$VENV_PYTHON" - <<'PY'
+import sys
+import importlib
+required = ["pydantic","pydantic_settings","aiogram","dotenv","openai","httpx","cryptography","aiosqlite"]
+missing = [m for m in required if importlib.util.find_spec(m) is None]
+print("missing:", missing)
+sys.exit(1 if missing else 0)
+PY
+    then
+        deps_missing="true"
+        print_warning "Missing Python dependencies detected; forcing install."
+    fi
+
+    if [ -n "$current_hash" ] && [ -f "$marker_file" ] && [ "$deps_missing" = "false" ]; then
         local previous_hash
         previous_hash="$(cat "$marker_file")"
         if [ "$current_hash" = "$previous_hash" ]; then
