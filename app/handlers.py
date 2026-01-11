@@ -20,7 +20,7 @@ from .languages import (
     LANGUAGE_MODE_DESCRIPTIONS,
     SUPPORTED_LANGUAGES,
 )
-from .llm import llm_client
+from .llm import get_llm_client
 from .payments import (
     GROUP_PLANS,
     PLANS,
@@ -853,7 +853,7 @@ async def on_text_input(msg: Message, state: FSMContext, db: DB):
         db.set_retry_flags(user_id, last_paid=True, free_retry=True)
 
         typing_msg = await msg.answer("🧠 Thinking...")
-        responses = await llm_client.generate_responses(
+        responses = await get_llm_client().generate_responses(
             goal,
             text,
             modifier,
@@ -872,7 +872,7 @@ async def on_text_input(msg: Message, state: FSMContext, db: DB):
         db.set_retry_flags(user_id, last_paid=False, free_retry=False)
 
         typing_msg = await msg.answer("🧠 Thinking...")
-        responses = await llm_client.generate_responses(
+        responses = await get_llm_client().generate_responses(
             goal,
             text,
             modifier,
@@ -1159,7 +1159,7 @@ async def retry_apply_handler(cb: CallbackQuery, db: DB):
         db.set_retry_flags(user_id, last_paid=True, free_retry=False)
 
         typing_msg = await cb.message.answer("🔄 Adjusting...")
-        responses = await llm_client.generate_responses(
+        responses = await get_llm_client().generate_responses(
             goal,
             last_text,
             modifier,
@@ -1182,7 +1182,7 @@ async def retry_apply_handler(cb: CallbackQuery, db: DB):
         db.set_retry_flags(user_id, last_paid=True, free_retry=False)
 
         typing_msg = await cb.message.answer("🔄 Adjusting...")
-        responses = await llm_client.generate_responses(
+        responses = await get_llm_client().generate_responses(
             goal,
             last_text,
             modifier,
@@ -1292,7 +1292,7 @@ async def group_moderation_handler(msg: Message, bot: Bot, db: DB):
     language_mode = group.get("language_mode", "clean")
 
     if settings.use_llm:
-        responses = await llm_client.generate_responses(
+        responses = await get_llm_client().generate_responses(
             "stabilize",
             msg.text,
             language=language,

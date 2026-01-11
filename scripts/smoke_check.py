@@ -9,7 +9,7 @@ sys.path.insert(0, str(REPO_ROOT))
 from app.config import settings
 from app.db import DB
 from app.handlers import router
-from app.llm import llm_client
+from app.llm import get_llm_client
 
 
 def _validate_responses(responses: List[str]) -> None:
@@ -27,7 +27,7 @@ async def _run_checks() -> None:
     if router is None:
         raise RuntimeError("Handlers router failed to initialize")
 
-    responses = await llm_client.generate_responses(
+    responses = await get_llm_client().generate_responses(
         "stabilize",
         "I need a calm response for a tense conversation.",
         None,

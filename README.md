@@ -62,6 +62,18 @@ chmod +x install_resolver.sh
 - `FEATURE_V2_GROUPS` - Enable v2 group moderation (`true`/`false`, default `false`)
 - `LOG_LEVEL` - Logging level (INFO, DEBUG, etc.)
 
+## Dependency Baseline
+- Python 3.9+
+- aiogram v3
+- openai v1
+- httpx v0.28+
+- pydantic v2
+
+## LLM Fallback & Lazy Initialization
+- The OpenAI client is created lazily only when LLM usage is enabled and a request is made.
+- If `USE_LLM=false`, `OPENAI_API_KEY` is missing, or the client fails to initialize, Resolver
+  falls back to template responses and continues running.
+
 ## V2 Feature Flags (Disabled by Default)
 V2 features are opt-in. If the flags are missing, they default to `false`.
 
