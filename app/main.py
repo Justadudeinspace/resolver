@@ -45,9 +45,9 @@ async def main() -> None:
     v2_enabled = settings.feature_v2_personal or settings.feature_v2_groups
     logger.info("FEATURES: v2_enabled=%s", v2_enabled)
     group_plan_summary = ", ".join(
-        f"{GROUP_PLANS[plan_id].name}={GROUP_PLANS[plan_id].stars} Stars"
+        f"{plan.name}={plan.stars} Stars"
         for plan_id in ("group_monthly", "group_yearly", "group_lifetime")
-        if plan_id in GROUP_PLANS
+        if (plan := GROUP_PLANS.get(plan_id))
     )
     logger.info("Group plan prices: %s", group_plan_summary or "none")
 
