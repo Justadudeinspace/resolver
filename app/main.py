@@ -12,7 +12,7 @@ from aiogram.types import BotCommand
 from .config import settings
 from .db import DB
 from .handlers import router
-from .middlewares import RateLimitMiddleware
+from .middlewares import RateLimitMiddleware, CallbackLoggingMiddleware, ErrorHandlingMiddleware
 from .payments import GROUP_PLANS
 from .texts import ERROR_MESSAGES, BOT_COMMANDS
 
@@ -44,6 +44,18 @@ async def main() -> None:
     logger = setup_logging()
     v2_enabled = settings.feature_v2_personal or settings.feature_v2_groups
     logger.info("FEATURES: v2_enabled=%s", v2_enabled)
+    logger.info(
+        "FEATURE FLAGS: v2_personal=%s v2_groups=%s use_llm=%s",
+        settings.feature_v2_personal,
+        settings.feature_v2_groups,
+        settings.use_llm,
+    )
+    if settings.openai_api_key:
+        logger.info("OpenAI API key detected for embeddings and LLM usage.")
+    elif settings.use_llm_env:
+        logger.warning("USE_LLM is enabled but OPENAI_API_KEY is missing.")
+    if not settings.invoice_secret_valid:
+        logger.warning("INVOICE_SECRET is missing or invalid; invoice signing is unsafe.")
     group_plan_summary = ", ".join(
         f"{plan.name}={plan.stars} Stars"
         for plan_id in ("group_monthly", "group_yearly", "group_lifetime")
@@ -66,7 +78,10 @@ async def main() -> None:
 
     dp["db"] = db
 
+    dp.message.middleware(ErrorHandlingMiddleware())
     dp.message.middleware(RateLimitMiddleware())
+    dp.callback_query.middleware(ErrorHandlingMiddleware())
+    dp.callback_query.middleware(CallbackLoggingMiddleware())
 
     dp.include_router(router)
 

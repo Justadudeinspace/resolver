@@ -23,4 +23,5 @@ This file documents the current repo structure, the startup commands, and the MV
 | app/texts.py | User-facing strings |
 | app/states.py | FSM states |
 | app/middlewares.py | Rate-limit middleware |
+| app/rag.py | Audit retrieval + RAG summarization |
 | app/payments.py | Telegram Stars payload signing/verification |

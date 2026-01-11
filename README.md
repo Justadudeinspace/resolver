@@ -19,6 +19,7 @@ A Telegram bot that helps you say the right thing without escalating conversatio
 - **Payments**: Telegram Stars invoices (XTR) with short invoice payloads stored in SQLite
 - **V2 Personal (opt-in)**: Language + language mode per user
 - **V2 Groups (opt-in)**: Admin-only group moderation with paid subscriptions
+- **V2 Group RAG**: Admin-only audit-based queries over moderation history
 
 ## Quick Start
 
@@ -59,6 +60,7 @@ source .venv/bin/activate
 - `OPENAI_API_KEY` - Optional (only if using LLM)
 - `LLM_MODEL` - Model name (default: `gpt-4o-mini`)
 - `LLM_TEMPERATURE` - Response creativity
+- `EMBEDDING_MODEL` - Embedding model for audit retrieval (default: `text-embedding-3-small`)
 - `RATE_LIMIT_PER_USER` - Requests per minute
 - `MAX_INPUT_LENGTH` - Max characters in input
 - `DB_PATH` - SQLite path (default: `./data/resolver.sqlite3`)
@@ -131,6 +133,12 @@ Plans:
 - Monthly: 20 ⭐ → 30 days
 - Yearly: 100 ⭐ → 365 days
 - Lifetime: 1000 ⭐ → no expiry
+
+## RAG Queries (V2 Groups)
+Group admins can query audit logs from the admin panel:
+- Ask questions like “last 24h incidents” or “why was user X muted?”
+- Results are summarized and cite audit IDs (no raw chat history).
+- Details can be revealed by admins only via “Show details” buttons.
 
 ## Moderation Ladder (V2 Groups)
 When entitled, triggers follow:

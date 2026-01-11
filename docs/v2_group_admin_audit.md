@@ -17,6 +17,7 @@
   - `groups` table stores settings keyed by `group_id` (chat id).
   - `get_group_settings` loads defaults and ensures a row exists.
   - Toggle/update helpers: `set_group_enabled`, `set_group_language`, `set_group_language_mode`, `set_group_thresholds`, `set_group_toggle`.
+  - `audit_events` table stores append-only audit records for moderation actions and admin panel changes.
 
 ## Subscription / entitlement logic
 - `app/db.py`:
@@ -36,3 +37,8 @@
 - `app/config.py`:
   - `FEATURE_V2_GROUPS` toggles group moderation.
   - `FEATURE_V2_PERSONAL` toggles v2 personal settings.
+
+## RAG query surface
+- `app/rag.py`:
+  - Audit retrieval over `audit_events`, with optional embeddings.
+  - Safe summaries and citations to audit IDs.
