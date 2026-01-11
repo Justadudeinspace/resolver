@@ -64,13 +64,26 @@ class LLMClient:
         self.use_openai = settings.use_llm
         self.model = settings.llm_model
         self.temperature = settings.llm_temperature
+        self.client: Optional[AsyncOpenAI] = None
 
-        if self.use_openai:
+        if not self.use_openai:
+            logger.info("LLM client using template responses")
+        elif not self.api_key:
+            logger.warning("LLM disabled because OPENAI_API_KEY is missing.")
+
+    def _ensure_client(self) -> bool:
+        if self.client is not None:
+            return True
+        if not self.use_openai or not self.api_key:
+            return False
+        try:
             self.client = AsyncOpenAI(api_key=self.api_key, timeout=12.0)
             logger.info("LLM client initialized with OpenAI")
-        else:
+            return True
+        except Exception as exc:
+            logger.warning("LLM client initialization failed; using fallback. Error: %s", exc)
             self.client = None
-            logger.info("LLM client using template responses")
+            return False
 
     async def generate_responses(
         self,
@@ -83,7 +96,7 @@ class LLMClient:
         """Generate three response options based on goal and modifier."""
         if modifier == "neutral":
             modifier = None
-        if not self.use_openai:
+        if not self._ensure_client():
             return self._generate_template_responses(goal, modifier)
 
         try:
