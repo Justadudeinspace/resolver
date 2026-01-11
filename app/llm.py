@@ -239,4 +239,11 @@ class LLMClient:
         return goal_templates.get(goal, goal_templates["stabilize"])
 
 
-llm_client = LLMClient()
+_llm_client: Optional[LLMClient] = None
+
+
+def get_llm_client() -> LLMClient:
+    global _llm_client
+    if _llm_client is None:
+        _llm_client = LLMClient()
+    return _llm_client
