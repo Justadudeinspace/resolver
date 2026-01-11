@@ -23,6 +23,58 @@ print_error() {
     echo -e "${RED}[ERROR]${NC} $1"
 }
 
+command_exists() {
+    command -v "$1" >/dev/null 2>&1
+}
+
+get_uname_o() {
+    if uname -o >/dev/null 2>&1; then
+        uname -o
+    else
+        echo ""
+    fi
+}
+
+getprop_value() {
+    local prop="$1"
+    if command_exists getprop; then
+        getprop "$prop"
+    elif [ -x /system/bin/getprop ]; then
+        /system/bin/getprop "$prop"
+    else
+        echo ""
+    fi
+}
+
+is_android() {
+    local uname_o
+    uname_o="$(get_uname_o)"
+    if [ "$uname_o" = "Android" ]; then
+        return 0
+    fi
+    [ -n "$(getprop_value ro.build.version.release)" ]
+}
+
+is_termux_native() {
+    if ! is_android; then
+        return 1
+    fi
+    if [ -n "${PREFIX-}" ] && [[ "$PREFIX" == /data/data/com.termux/files/usr* ]]; then
+        return 0
+    fi
+    if [ -n "${TERMUX_VERSION-}" ]; then
+        return 0
+    fi
+    if [ -x /data/data/com.termux/files/usr/bin/pkg ]; then
+        local uname_o
+        uname_o="$(get_uname_o)"
+        if [ "$uname_o" = "Android" ]; then
+            return 0
+        fi
+    fi
+    return 1
+}
+
 read_env_value() {
     local key="$1"
     local value=""
@@ -97,15 +149,13 @@ fi
 
 # Detect Termux
 IS_TERMUX=false
-if [ -f /system/build.prop ] && [ -d /data/data/com.termux/files/usr ]; then
+if is_termux_native; then
     IS_TERMUX=true
 fi
 
 # Check Python
 if command -v python3 &> /dev/null; then
     PYTHON_BIN="python3"
-elif command -v python &> /dev/null; then
-    PYTHON_BIN="python"
 else
     print_error "Python 3 not found"
     exit 1
@@ -203,9 +253,4 @@ fi
 print_info "Starting The Resolver bot..."
 print_info "Press Ctrl+C to stop"
 
-RUN_PYTHON="python"
-if ! command -v "$RUN_PYTHON" &> /dev/null; then
-    RUN_PYTHON="$PYTHON_BIN"
-fi
-
-PYTHONPATH=. $RUN_PYTHON -u -m app.main
+PYTHONPATH=. $PYTHON_BIN -u -m app.main
