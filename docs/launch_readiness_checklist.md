@@ -10,7 +10,7 @@
 - [ ] Test Telegram Stars invoices in a staging bot.
 - [ ] Verify pre-checkout and successful payment callbacks for:
   - [ ] DM resolve credits
-  - [ ] Group subscriptions (monthly/yearly/lifetime)
+- [ ] Group subscriptions (monthly/yearly/charter)
 - [ ] Confirm idempotency with duplicate `telegram_payment_charge_id`.
 
 ## Database

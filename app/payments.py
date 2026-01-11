@@ -1,46 +1,10 @@
 import logging
 import secrets
-from dataclasses import dataclass
-from typing import Dict, Any, Optional
+from typing import Any, Optional
 
 logger = logging.getLogger(__name__)
 
 INVOICE_TTL_SECONDS = 86400
-
-
-@dataclass(frozen=True)
-class Plan:
-    id: str
-    name: str
-    stars: int
-    resolves: int
-
-
-@dataclass(frozen=True)
-class GroupPlan:
-    id: str
-    name: str
-    stars: int
-    duration_days: Optional[int]
-
-
-PLANS: Dict[str, Plan] = {
-    "starter": Plan(id="starter", name="Starter", stars=5, resolves=1),
-    "bundle": Plan(id="bundle", name="Bundle", stars=20, resolves=5),
-    "pro": Plan(id="pro", name="Pro", stars=50, resolves=15),
-}
-
-GROUP_MONTHLY_STARS = 20
-GROUP_YEARLY_STARS = 100
-GROUP_LIFETIME_STARS = 1000
-
-GROUP_PLANS: Dict[str, GroupPlan] = {
-    "group_monthly": GroupPlan(id="group_monthly", name="Monthly", stars=GROUP_MONTHLY_STARS, duration_days=30),
-    "group_yearly": GroupPlan(id="group_yearly", name="Yearly", stars=GROUP_YEARLY_STARS, duration_days=365),
-    "group_lifetime": GroupPlan(
-        id="group_lifetime", name="Lifetime", stars=GROUP_LIFETIME_STARS, duration_days=None
-    ),
-}
 
 
 def generate_invoice_id() -> str:
@@ -53,6 +17,10 @@ def build_group_plan_key(plan_id: str, group_id: int) -> str:
 
 def build_personal_plan_key(plan_id: str) -> str:
     return f"personal:{plan_id}"
+
+
+def build_rag_plan_key(plan_id: str, group_id: int) -> str:
+    return f"rag:{plan_id}:{group_id}"
 
 
 def parse_group_plan_key(plan_key: str) -> Optional[Dict[str, Any]]:
@@ -71,3 +39,14 @@ def parse_personal_plan_key(plan_key: str) -> Optional[str]:
         return None
     _, plan_id = plan_key.split(":", 1)
     return plan_id or None
+
+
+def parse_rag_plan_key(plan_key: str) -> Optional[Dict[str, Any]]:
+    if not plan_key.startswith("rag:"):
+        return None
+    try:
+        _, plan_id, group_id = plan_key.split(":", 2)
+        return {"plan_id": plan_id, "group_id": int(group_id)}
+    except (ValueError, TypeError):
+        logger.warning("Invalid RAG plan key: %s", plan_key)
+        return None

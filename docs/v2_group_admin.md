@@ -51,12 +51,14 @@ Group moderation requires an active subscription:
 - Optional admin notifications are rate-limited to avoid spam.
 
 ### Pricing (Telegram Stars)
-Group subscriptions are billed via Telegram Stars using the canonical pricing in `app/payments.py`:
-- Monthly: 20 ⭐ → 30 days
-- Yearly: 100 ⭐ → 365 days
-- Lifetime: 1000 ⭐ → permanent
+Group subscriptions are billed via Telegram Stars using the canonical pricing in `app/pricing.py`:
+- Group Monthly: 150 ⭐ → 30 days
+- Group Yearly: 1500 ⭐ → 365 days
+- Group Charter: 4000 ⭐ → one-time, non-refundable, lifetime access
 
-Lifetime is intentionally premium, must be explicitly chosen, and is never a default option.
+RAG Add-On (per-group):
+- RAG Monthly Add-On: 50 ⭐ → 30 days
+- Requires an active group subscription and explicit add-on entitlement.
 
 ## Moderation ladder (group mode)
 Detect → De-escalate → Warn → Temp mute → Notify admins

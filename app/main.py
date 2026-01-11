@@ -13,7 +13,7 @@ from .config import settings
 from .db import DB
 from .handlers import router
 from .middlewares import RateLimitMiddleware, CallbackLoggingMiddleware, ErrorHandlingMiddleware
-from .payments import GROUP_PLANS
+from .pricing import GROUP_PLANS
 from .texts import ERROR_MESSAGES, BOT_COMMANDS
 
 
@@ -58,7 +58,7 @@ async def main() -> None:
         logger.warning("INVOICE_SECRET is missing or invalid; invoice signing is unsafe.")
     group_plan_summary = ", ".join(
         f"{plan.name}={plan.stars} Stars"
-        for plan_id in ("group_monthly", "group_yearly", "group_lifetime")
+        for plan_id in ("group_monthly", "group_yearly", "group_charter")
         if (plan := GROUP_PLANS.get(plan_id))
     )
     logger.info("Group plan prices: %s", group_plan_summary or "none")

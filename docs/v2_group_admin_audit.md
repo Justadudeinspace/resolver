@@ -22,16 +22,20 @@
 ## Subscription / entitlement logic
 - `app/db.py`:
   - `group_subscriptions` table stores group subscriptions.
+  - `group_rag_subscriptions` table stores RAG add-on entitlements.
   - `group_subscription_active` and `get_group_subscription_info` read entitlement state.
   - `process_group_invoice_payment` stores paid subscriptions.
+  - `group_rag_subscription_active` and `get_group_rag_subscription_info` read RAG entitlements.
+  - `process_rag_invoice_payment` stores paid RAG add-ons.
 - `app/handlers.py`:
   - Group entitlement gate uses `require_group_entitlement`.
-  - Invoices are generated from `GROUP_PLANS` and validated in `pre_checkout` and `successful_payment`.
+  - RAG entitlement gate uses `require_group_rag_entitlement`.
+  - Invoices are generated from pricing in `app/pricing.py` and validated in `pre_checkout` and `successful_payment`.
 
 ## Pricing constants
-- `app/payments.py`:
-  - `GROUP_MONTHLY_STARS`, `GROUP_YEARLY_STARS`, `GROUP_LIFETIME_STARS`.
+- `app/pricing.py`:
   - `GROUP_PLANS` is the canonical source for group plan pricing and durations.
+  - `RAG_ADDON_PLANS` defines the paid RAG add-on pricing.
 
 ## Feature flags (env / config)
 - `app/config.py`:

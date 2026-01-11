@@ -1,6 +1,8 @@
 import html
 from typing import Dict
 
+from .pricing import PERSONAL_PLANS, GROUP_PLANS, RAG_ADDON_PLANS
+
 EMOJIS = {
     "stabilize": "🧘",
     "clarify": "🧭",
@@ -51,19 +53,30 @@ GOAL_PROMPTS: Dict[str, str] = {
     for key, desc in GOAL_DESCRIPTIONS.items()
 }
 
+_PERSONAL_MONTHLY = PERSONAL_PLANS["personal_monthly"]
+_PERSONAL_YEARLY = PERSONAL_PLANS["personal_yearly"]
+_PERSONAL_LIFETIME = PERSONAL_PLANS["personal_lifetime"]
+_GROUP_MONTHLY = GROUP_PLANS["group_monthly"]
+_GROUP_YEARLY = GROUP_PLANS["group_yearly"]
+_GROUP_CHARTER = GROUP_PLANS["group_charter"]
+_RAG_MONTHLY = RAG_ADDON_PLANS["rag_monthly"]
+
 PRICING_TEXT = (
     f"{EMOJIS['buy']} <b>Pricing</b>\n\n"
     "<b>Personal (DM)</b>\n"
     "🎁 1 Stabilize per day (free)\n"
-    "⭐ <b>5 Stars</b> → 1 Resolve\n"
-    "⭐ <b>20 Stars</b> → 5 Resolves\n"
-    "⭐ <b>50 Stars</b> → 15 Resolves\n\n"
-    "<i>No subscriptions or lifetime for Personal.</i>\n\n"
+    f"⭐ <b>Personal Monthly</b> — {_PERSONAL_MONTHLY.stars} Stars\n"
+    f"⭐ <b>Personal Yearly</b> — {_PERSONAL_YEARLY.stars} Stars\n"
+    f"⭐ <b>Personal Lifetime</b> — {_PERSONAL_LIFETIME.stars} Stars\n\n"
     "<b>Group (PLUS, per-group)</b>\n"
-    "⭐ Monthly — 20 Stars\n"
-    "⭐ Yearly — 100 Stars\n"
-    "⭐ Lifetime — 1000 Stars (permanent)\n"
+    f"⭐ Group Monthly — {_GROUP_MONTHLY.stars} Stars\n"
+    f"⭐ Group Yearly — {_GROUP_YEARLY.stars} Stars\n"
+    f"⭐ Group Charter — {_GROUP_CHARTER.stars} Stars\n"
+    "<i>Charter is one-time, non-refundable, lifetime access.</i>\n"
     "<i>All group features are paid. Admins purchase via /groupadmin.</i>\n\n"
+    "<b>RAG Add-On (per-group)</b>\n"
+    f"⭐ RAG Monthly Add-On — {_RAG_MONTHLY.stars} Stars\n"
+    "<i>Requires an active group subscription.</i>\n\n"
     "<i>Pay with Telegram Stars. Tap a plan to open a Stars invoice.</i>\n"
     "<i>Resolves are added only after successful payment.</i>"
 )
@@ -102,7 +115,7 @@ ERROR_MESSAGES = {
     "no_resolves": (
         f"{EMOJIS['buy']} <b>Out of Resolves</b>\n\n"
         "You've used all available resolves.\n"
-        "Open /pricing to grab a Stars bundle."
+        "Open /pricing to grab a Stars plan."
     ),
     "invalid_input": (
         "✍️ <b>Input too long</b>\n\n"
@@ -127,7 +140,7 @@ BOT_COMMANDS = [
     ("start", "Begin. Choose a goal and resolve a message."),
     ("resolve", "Resolve a message by choosing a goal and getting clear options."),
     ("pricing", "View Personal and Group pricing."),
-    ("buy", "Purchase resolve bundles with Stars."),
+    ("buy", "Purchase personal plans with Stars."),
     ("account", "View your remaining resolves and usage."),
     ("settings", "Set defaults and language (v2 personal)."),
     ("groupadmin", "Admin-only group control panel."),

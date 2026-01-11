@@ -24,4 +24,5 @@ This file documents the current repo structure, the startup commands, and the MV
 | app/states.py | FSM states |
 | app/middlewares.py | Rate-limit middleware |
 | app/rag.py | Audit retrieval + RAG summarization |
-| app/payments.py | Telegram Stars payload signing/verification |
+| app/payments.py | Invoice payload helpers + invoice TTL |
+| app/pricing.py | Authoritative pricing constants |

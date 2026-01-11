@@ -3,7 +3,7 @@
 ## Telegram setup
 - Create your bot with @BotFather and record the BOT_TOKEN.
 - Enable Telegram Stars payments for the bot.
-- Make sure your plan IDs match those configured in `app/payments.py` (starter, bundle, pro; group plans as needed).
+- Make sure your plan IDs match those configured in `app/pricing.py` (personal_monthly, personal_yearly, personal_lifetime; group_monthly, group_yearly, group_charter; rag_monthly).
 
 ## Local setup
 1) Install dependencies:

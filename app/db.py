@@ -116,6 +116,18 @@ CREATE TABLE IF NOT EXISTS group_subscriptions (
     created_at INTEGER DEFAULT CURRENT_TIMESTAMP
 );
 
+CREATE TABLE IF NOT EXISTS group_rag_subscriptions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    group_id INTEGER NOT NULL,
+    plan_id TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'active',
+    start_ts INTEGER NOT NULL,
+    end_ts INTEGER,
+    stars_amount INTEGER NOT NULL,
+    transaction_id TEXT NOT NULL UNIQUE,
+    created_at INTEGER DEFAULT CURRENT_TIMESTAMP
+);
+
 CREATE TABLE IF NOT EXISTS invoices (
     invoice_id TEXT PRIMARY KEY,
     user_id INTEGER NOT NULL,
@@ -879,6 +891,66 @@ class DB:
 
             return "processed"
 
+    def process_rag_invoice_payment(
+        self,
+        invoice_id: str,
+        telegram_charge_id: str,
+        group_id: int,
+        plan_id: str,
+        stars_amount: int,
+        start_ts: int,
+        end_ts: Optional[int],
+    ) -> str:
+        with self._conn() as conn:
+            if not telegram_charge_id:
+                logger.warning("Missing Telegram charge id for RAG invoice %s", invoice_id)
+                return "invalid"
+
+            cursor = conn.execute(
+                "SELECT 1 FROM invoices WHERE telegram_charge_id = ?",
+                (telegram_charge_id,),
+            )
+            if cursor.fetchone():
+                return "duplicate"
+
+            cursor = conn.execute(
+                "SELECT 1 FROM group_rag_subscriptions WHERE transaction_id = ?",
+                (telegram_charge_id,),
+            )
+            if cursor.fetchone():
+                return "duplicate"
+
+            row = conn.execute(
+                "SELECT status FROM invoices WHERE invoice_id = ?",
+                (invoice_id,),
+            ).fetchone()
+            if not row or row["status"] != "created":
+                return "invalid"
+
+            cursor = conn.execute(
+                """
+                UPDATE invoices
+                SET status = 'paid', telegram_charge_id = ?
+                WHERE invoice_id = ? AND status = 'created'
+                """,
+                (telegram_charge_id, invoice_id),
+            )
+            if cursor.rowcount != 1:
+                return "invalid"
+
+            cursor = conn.execute(
+                """
+                INSERT OR IGNORE INTO group_rag_subscriptions
+                (group_id, plan_id, stars_amount, transaction_id, start_ts, end_ts, status)
+                VALUES (?, ?, ?, ?, ?, ?, 'active')
+                """,
+                (group_id, plan_id, stars_amount, telegram_charge_id, start_ts, end_ts),
+            )
+            if cursor.rowcount == 0:
+                return "duplicate"
+
+            return "processed"
+
     def group_subscription_active(self, group_id: int) -> bool:
         now = int(datetime.utcnow().timestamp())
         with self._conn() as conn:
@@ -895,12 +967,53 @@ class DB:
             )
             return cursor.fetchone() is not None
 
+    def group_rag_subscription_active(self, group_id: int) -> bool:
+        now = int(datetime.utcnow().timestamp())
+        with self._conn() as conn:
+            cursor = conn.execute(
+                """
+                SELECT 1 FROM group_rag_subscriptions
+                WHERE group_id = ?
+                AND status = 'active'
+                AND (end_ts IS NULL OR end_ts > ?)
+                ORDER BY start_ts DESC
+                LIMIT 1
+                """,
+                (group_id, now),
+            )
+            return cursor.fetchone() is not None
+
     def get_group_subscription_info(self, group_id: int) -> Dict[str, Any]:
         now = int(datetime.utcnow().timestamp())
         with self._conn() as conn:
             cursor = conn.execute(
                 """
                 SELECT * FROM group_subscriptions
+                WHERE group_id = ?
+                ORDER BY start_ts DESC
+                LIMIT 1
+                """,
+                (group_id,),
+            )
+            row = cursor.fetchone()
+            if not row:
+                return {"active": False, "end_ts": None, "plan_id": None}
+            data = dict(row)
+            active = data.get("status") == "active" and (
+                data.get("end_ts") is None or data.get("end_ts") > now
+            )
+            return {
+                "active": active,
+                "end_ts": data.get("end_ts"),
+                "plan_id": data.get("plan_id"),
+            }
+
+    def get_group_rag_subscription_info(self, group_id: int) -> Dict[str, Any]:
+        now = int(datetime.utcnow().timestamp())
+        with self._conn() as conn:
+            cursor = conn.execute(
+                """
+                SELECT * FROM group_rag_subscriptions
                 WHERE group_id = ?
                 ORDER BY start_ts DESC
                 LIMIT 1

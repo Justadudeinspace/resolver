@@ -3,7 +3,7 @@
 ## Phase 1: Core v2 delivery (current)
 - V2 Personal (language + mode) behind `FEATURE_V2_PERSONAL`.
 - V2 Group moderation (admin-only, paid) behind `FEATURE_V2_GROUPS`.
-- Telegram Stars group subscriptions (monthly/yearly/lifetime).
+- Telegram Stars group subscriptions (monthly/yearly/charter).
 - Admin-only moderation logs and control panel.
 
 ## Phase 2: Expanded group tooling

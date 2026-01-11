@@ -53,7 +53,7 @@ This checklist covers what Codex fixed, what still requires human action, and ho
 
 ## D) Payments Verification (Operator must do)
 - [ ] Test a Stars purchase end-to-end (pricing → invoice → pre-checkout → successful payment).
-  - HOW TO VERIFY: Use `/pricing` or `/buy starter` in Telegram, complete a Stars purchase.
+  - HOW TO VERIFY: Use `/pricing` or `/buy personal_monthly` in Telegram, complete a Stars purchase.
 - [ ] Confirm pre-checkout validation accepts valid payloads and rejects invalid payloads.
   - HOW TO VERIFY: Check `logs/resolver.log` for `Pre-checkout error` (should be absent on success).
 - [ ] Confirm successful payment credits resolves exactly once (idempotent).
