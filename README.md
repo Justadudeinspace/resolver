@@ -43,7 +43,7 @@ cp .env.example .env
 
 ## Termux Install (Android)
 ```bash
-pkg install git
+pkg install git python3
 chmod +x install_resolver.sh
 ./install_resolver.sh
 ./run_resolver.sh
