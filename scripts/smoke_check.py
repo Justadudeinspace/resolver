@@ -1,6 +1,10 @@
 import asyncio
 import sys
+from pathlib import Path
 from typing import List
+
+REPO_ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(REPO_ROOT))
 
 from app.config import settings
 from app.db import DB
