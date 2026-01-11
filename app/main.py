@@ -41,6 +41,8 @@ def setup_logging() -> Logger:
 
 async def main() -> None:
     logger = setup_logging()
+    v2_enabled = settings.feature_v2_personal or settings.feature_v2_groups
+    logger.info("FEATURES: v2_enabled=%s", v2_enabled)
 
     if not settings.bot_token_valid:
         logger.error("BOT_TOKEN is missing. Update your .env file.")
