@@ -241,6 +241,13 @@ def render_groupadmin_text(group: dict, subscription_info: dict, feature_enabled
     )
 
 
+def _group_plan_button_text(plan_id: str, fallback: str) -> str:
+    plan = GROUP_PLANS.get(plan_id)
+    if not plan:
+        return fallback
+    return f"⭐ {plan.name} — {plan.stars} Stars"
+
+
 def kb_groupadmin(group: dict, subscription_info: dict, feature_enabled: bool):
     b = InlineKeyboardBuilder()
     if not feature_enabled:
@@ -271,9 +278,18 @@ def kb_groupadmin(group: dict, subscription_info: dict, feature_enabled: bool):
     )
 
     if not subscription_info.get("active"):
-        b.button(text="⭐ Buy Monthly", callback_data="group:buy:group_monthly")
-        b.button(text="⭐ Buy Yearly", callback_data="group:buy:group_yearly")
-        b.button(text="⭐ Buy Lifetime", callback_data="group:buy:group_lifetime")
+        b.button(
+            text=_group_plan_button_text("group_monthly", "⭐ Buy Monthly"),
+            callback_data="group:buy:group_monthly",
+        )
+        b.button(
+            text=_group_plan_button_text("group_yearly", "⭐ Buy Yearly"),
+            callback_data="group:buy:group_yearly",
+        )
+        b.button(
+            text=_group_plan_button_text("group_lifetime", "⭐ Buy Lifetime"),
+            callback_data="group:buy:group_lifetime",
+        )
     b.button(text=f"{EMOJIS['back']} Close", callback_data="group:menu:close")
     b.adjust(2, 2, 2, 2, 2, 1)
     return b.as_markup()

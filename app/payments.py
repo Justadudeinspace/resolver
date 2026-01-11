@@ -30,10 +30,16 @@ PLANS: Dict[str, Plan] = {
     "pro": Plan(id="pro", name="Pro", stars=50, resolves=15),
 }
 
+GROUP_MONTHLY_STARS = 20
+GROUP_YEARLY_STARS = 100
+GROUP_LIFETIME_STARS = 1000
+
 GROUP_PLANS: Dict[str, GroupPlan] = {
-    "group_monthly": GroupPlan(id="group_monthly", name="Monthly", stars=20, duration_days=30),
-    "group_yearly": GroupPlan(id="group_yearly", name="Yearly", stars=100, duration_days=365),
-    "group_lifetime": GroupPlan(id="group_lifetime", name="Lifetime", stars=500, duration_days=None),
+    "group_monthly": GroupPlan(id="group_monthly", name="Monthly", stars=GROUP_MONTHLY_STARS, duration_days=30),
+    "group_yearly": GroupPlan(id="group_yearly", name="Yearly", stars=GROUP_YEARLY_STARS, duration_days=365),
+    "group_lifetime": GroupPlan(
+        id="group_lifetime", name="Lifetime", stars=GROUP_LIFETIME_STARS, duration_days=None
+    ),
 }
 
 
