@@ -99,7 +99,7 @@ V2 features are opt-in. If the flags are missing, they default to `false`.
 ## Stars Invoice Payloads
 - The invoice payload is a short `invoice_id` (<= 128 bytes) stored in SQLite.
 - Invoice context (user, plan scope, amount, currency, status, timestamps) is persisted before sending the invoice.
-- `plan_id` is stored as `personal:<tier>` for DM bundles or `group:<plan>:<group_id>` for group subscriptions.
+- `plan_id` is stored as `personal:<plan>` for DM plans, `group:<plan>:<group_id>` for group subscriptions, and `rag:<plan>:<group_id>` for RAG add-ons.
 - Idempotency is enforced via `telegram_payment_charge_id` on successful payment handling.
 
 ## Core Flow
@@ -119,16 +119,20 @@ V2 features are opt-in. If the flags are missing, they default to `false`.
 ## Pricing & Entitlements
 **Personal (DM)**
 - **Free tier**: 1 Stabilize resolve per day.
-- **Paid usage** (no subscriptions or lifetime):
-  - Starter: 5 ⭐ = 1 resolve
-  - Bundle: 20 ⭐ = 5 resolves
-  - Pro: 50 ⭐ = 15 resolves
+- **Paid usage** (Telegram Stars):
+  - Personal Monthly: 50 ⭐
+  - Personal Yearly: 450 ⭐
+  - Personal Lifetime: 1000 ⭐
 - **Retry rule**: One free retry after a paid resolve; additional retries consume paid resolves.
 
 **Group (PLUS, per-group)**
 - All group features are paid and require an active subscription per group.
-- Subscriptions: Monthly 20 ⭐, Yearly 100 ⭐, Lifetime 1000 ⭐.
-- Lifetime is permanent and intentionally premium (never a default option).
+- Subscriptions: Group Monthly 150 ⭐, Group Yearly 1500 ⭐, Group Charter 4000 ⭐.
+- Charter is one-time, non-refundable, lifetime access.
+
+**RAG Add-On (per-group)**
+- RAG Monthly Add-On: 50 ⭐.
+- Requires an active group subscription and explicit add-on entitlement.
 
 ## Group Subscriptions (V2 Groups)
 Group moderation is admin-only and requires:
@@ -139,15 +143,16 @@ Group moderation is admin-only and requires:
 The group admin panel also lets admins set welcome messages, rules text, and security settings per group.
 
 Plans:
-- Monthly: 20 ⭐ → 30 days
-- Yearly: 100 ⭐ → 365 days
-- Lifetime: 1000 ⭐ → permanent (premium, explicit)
+- Group Monthly: 150 ⭐ → 30 days
+- Group Yearly: 1500 ⭐ → 365 days
+- Group Charter: 4000 ⭐ → one-time, non-refundable, lifetime access
 
 ## RAG Queries (V2 Groups)
 Group admins can query audit logs from the admin panel:
 - Ask questions like “last 24h incidents” or “why was user X muted?”
 - Results are summarized and cite audit IDs (no raw chat history).
 - Details can be revealed by admins only via “Show details” buttons.
+- RAG requires an active group subscription and the RAG Add-On.
 
 ## Moderation Ladder (V2 Groups)
 When entitled, triggers follow:
@@ -163,7 +168,7 @@ No auto-bans, no silent moderation, no admin overrides.
 - `/start` - Begin. Choose a goal and resolve a message.
 - `/resolve` - Resolve a message by choosing a goal and getting clear options.
 - `/pricing` - View Personal and Group pricing.
-- `/buy` - Purchase resolve bundles with Stars.
+- `/buy` - Purchase personal plans with Stars.
 - `/account` - View your remaining resolves and usage.
 - `/settings` - Set your default goal, response style, and language (v2 personal).
 - `/help` - Learn how to use The Resolver.
@@ -200,6 +205,7 @@ No auto-bans, no silent moderation, no admin overrides.
 │   ├── main.py
 │   ├── middlewares.py
 │   ├── payments.py
+│   ├── pricing.py
 │   ├── states.py
 │   └── texts.py
 ├── .env.example
