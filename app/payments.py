@@ -51,6 +51,10 @@ def build_group_plan_key(plan_id: str, group_id: int) -> str:
     return f"group:{plan_id}:{group_id}"
 
 
+def build_personal_plan_key(plan_id: str) -> str:
+    return f"personal:{plan_id}"
+
+
 def parse_group_plan_key(plan_key: str) -> Optional[Dict[str, Any]]:
     if not plan_key.startswith("group:"):
         return None
@@ -60,3 +64,10 @@ def parse_group_plan_key(plan_key: str) -> Optional[Dict[str, Any]]:
     except (ValueError, TypeError):
         logger.warning("Invalid group plan key: %s", plan_key)
         return None
+
+
+def parse_personal_plan_key(plan_key: str) -> Optional[str]:
+    if not plan_key.startswith("personal:"):
+        return None
+    _, plan_id = plan_key.split(":", 1)
+    return plan_id or None

@@ -27,8 +27,10 @@ from .payments import (
     PLANS,
     INVOICE_TTL_SECONDS,
     build_group_plan_key,
+    build_personal_plan_key,
     generate_invoice_id,
     parse_group_plan_key,
+    parse_personal_plan_key,
 )
 from .states import Flow
 from .texts import (
@@ -282,10 +284,24 @@ async def _maybe_notify_group_entitlement(bot: Bot, group_id: int) -> None:
         logger.warning("Failed to notify group %s about subscription status: %s", group_id, exc)
 
 
-def _format_expiry(end_ts: Optional[int]) -> str:
+def _format_expiry(end_ts: Optional[int], plan_id: Optional[str]) -> str:
+    plan = GROUP_PLANS.get(plan_id or "")
+    if not plan:
+        return "N/A"
+    if plan.duration_days is None:
+        return "Lifetime (permanent)"
     if not end_ts:
-        return "Never"
+        return "Unknown"
     return datetime.utcfromtimestamp(end_ts).strftime("%Y-%m-%d")
+
+
+def _format_plan_label(plan_id: Optional[str]) -> str:
+    plan = GROUP_PLANS.get(plan_id or "")
+    if not plan:
+        return "None"
+    if plan.duration_days is None:
+        return f"{plan.name} (permanent)"
+    return f"{plan.name} ({plan.stars} Stars)"
 
 
 def render_groupadmin_text(group: dict, subscription_info: dict, feature_enabled: bool) -> str:
@@ -299,7 +315,8 @@ def render_groupadmin_text(group: dict, subscription_info: dict, feature_enabled
     language_label = LANGUAGE_LABELS.get(language, language)
     mode_label = LANGUAGE_MODE_LABELS.get(mode, mode.title())
     subscription_status = "Active" if subscription_info.get("active") else "Inactive"
-    expires = _format_expiry(subscription_info.get("end_ts"))
+    plan_label = _format_plan_label(subscription_info.get("plan_id"))
+    expires = _format_expiry(subscription_info.get("end_ts"), subscription_info.get("plan_id"))
     return (
         "🛡️ <b>Group Admin Panel</b>\n\n"
         f"Moderation enabled: {'On' if group.get('enabled') else 'Off'}\n"
@@ -310,7 +327,9 @@ def render_groupadmin_text(group: dict, subscription_info: dict, feature_enabled
         f"Welcome: {'On' if group.get('welcome_enabled') else 'Off'}\n"
         f"Rules: {'On' if group.get('rules_enabled') else 'Off'}\n"
         f"Security: {'On' if group.get('security_enabled') else 'Off'}\n\n"
-        f"Subscription: {subscription_status} (expires: {expires})"
+        f"Subscription: {subscription_status}\n"
+        f"Plan: {plan_label}\n"
+        f"Expires: {expires}"
     )
 
 
@@ -374,6 +393,8 @@ def _group_plan_button_text(plan_id: str, fallback: str) -> str:
     plan = GROUP_PLANS.get(plan_id)
     if not plan:
         return fallback
+    if plan.duration_days is None:
+        return f"⭐ {plan.name} (permanent) — {plan.stars} Stars"
     return f"⭐ {plan.name} — {plan.stars} Stars"
 
 
@@ -713,7 +734,7 @@ async def cmd_buy(msg: Message, command: CommandObject, bot: Bot, db: DB):
         payload = _create_invoice_record(
             db=db,
             user_id=msg.from_user.id,
-            plan_id=plan.id,
+            plan_id=build_personal_plan_key(plan.id),
             amount=plan.stars,
         )
         if not payload:
@@ -726,12 +747,12 @@ async def cmd_buy(msg: Message, command: CommandObject, bot: Bot, db: DB):
             plan.stars,
             len(payload),
         )
-        prices = [LabeledPrice(label=f"{plan.resolves} Resolves", amount=plan.stars)]
+        prices = [LabeledPrice(label=f"{plan.resolves} Resolves (Personal)", amount=plan.stars)]
         try:
             await bot.send_invoice(
                 chat_id=msg.from_user.id,
-                title=f"{plan.name} - The Resolver",
-                description=f"Get {plan.resolves} resolve(s) for The Resolver bot",
+                title=f"Personal {plan.name} - The Resolver",
+                description=f"Personal (DM) bundle: {plan.resolves} resolve(s).",
                 payload=payload,
                 provider_token="",
                 currency="XTR",
@@ -1454,12 +1475,17 @@ async def groupadmin_handler(cb: CallbackQuery, bot: Bot, db: DB, state: FSMCont
             plan.stars,
             len(payload),
         )
-        prices = [LabeledPrice(label=f"Group Subscription {plan.name}", amount=plan.stars)]
+        duration_label = "permanent" if plan.duration_days is None else f"{plan.duration_days} days"
+        prices = [LabeledPrice(label=f"Group {plan.name} Subscription ({duration_label})", amount=plan.stars)]
         try:
             await bot.send_invoice(
                 chat_id=cb.from_user.id,
                 title=f"Group {plan.name} Subscription",
-                description=f"Activate group moderation for {plan.name.lower()} billing.",
+                description=(
+                    "Per-group subscription. "
+                    f"Duration: {duration_label}. "
+                    "Activates paid group moderation."
+                ),
                 payload=payload,
                 provider_token="",
                 currency="XTR",
@@ -1788,7 +1814,7 @@ async def buy_handler(cb: CallbackQuery, bot: Bot, db: DB):
     payload = _create_invoice_record(
         db=db,
         user_id=cb.from_user.id,
-        plan_id=plan.id,
+        plan_id=build_personal_plan_key(plan.id),
         amount=plan.stars,
     )
     if not payload:
@@ -1801,13 +1827,13 @@ async def buy_handler(cb: CallbackQuery, bot: Bot, db: DB):
         plan.stars,
         len(payload),
     )
-    prices = [LabeledPrice(label=f"{plan.resolves} Resolves", amount=plan.stars)]
+    prices = [LabeledPrice(label=f"{plan.resolves} Resolves (Personal)", amount=plan.stars)]
 
     try:
         await bot.send_invoice(
             chat_id=cb.from_user.id,
-            title=f"{plan.name} - The Resolver",
-            description=f"Get {plan.resolves} resolve(s) for The Resolver bot",
+            title=f"Personal {plan.name} - The Resolver",
+            description=f"Personal (DM) bundle: {plan.resolves} resolve(s).",
             payload=payload,
             provider_token="",
             currency="XTR",
@@ -2003,7 +2029,8 @@ async def pre_checkout(pre_checkout_query: PreCheckoutQuery, db: DB):
             )
             return
 
-        plan = PLANS.get(str(invoice["plan_id"]))
+        personal_plan_id = parse_personal_plan_key(str(invoice["plan_id"])) or str(invoice["plan_id"])
+        plan = PLANS.get(personal_plan_id)
         if not plan or plan.stars != int(invoice["amount"]):
             await _pre_checkout_fail(
                 pre_checkout_query, "Invoice expired or invalid. Please try again."
@@ -2087,7 +2114,7 @@ async def successful_payment(msg: Message, db: DB):
             await msg.answer(
                 f"✅ Group subscription activated: {plan.name}.\n"
                 f"Group ID: {group_info['group_id']}\n"
-                f"Expires: {_format_expiry(end_ts)}"
+                f"Expires: {_format_expiry(end_ts, plan.id)}"
             )
             charge_id_prefix = transaction_id[-6:] if transaction_id else "unknown"
             logger.info(
@@ -2099,7 +2126,8 @@ async def successful_payment(msg: Message, db: DB):
             )
             return
 
-        plan = PLANS.get(str(invoice["plan_id"]))
+        personal_plan_id = parse_personal_plan_key(str(invoice["plan_id"])) or str(invoice["plan_id"])
+        plan = PLANS.get(personal_plan_id)
         if not plan:
             logger.error("Unknown plan in payment")
             await msg.answer("Payment processing error. Please contact support.")
