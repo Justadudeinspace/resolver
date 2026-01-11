@@ -87,6 +87,17 @@ GROUP_TEMPLATES = {
     "notify_admins": "Admins notified: moderation action taken.",
 }
 
+WELCOME_MAX_LENGTH = 2000
+RULES_MAX_LENGTH = 4000
+SECURITY_DEFAULTS = {
+    "anti_link": False,
+    "anti_spam": False,
+    "mute_seconds": 600,
+    "max_warnings": 3,
+}
+SECURITY_MUTE_RANGE = (1, 86400)
+SECURITY_WARNING_RANGE = (1, 20)
+
 
 def _create_invoice_record(
     db: DB,
@@ -303,6 +314,62 @@ def render_groupadmin_text(group: dict, subscription_info: dict, feature_enabled
     )
 
 
+def _subscription_required_notice() -> str:
+    return "⚠️ Group moderation requires an active subscription."
+
+
+async def _require_group_entitlement_cb(cb: CallbackQuery, db: DB, group_id: int) -> bool:
+    if require_group_entitlement(db, group_id):
+        return True
+    await cb.answer(_subscription_required_notice(), show_alert=True)
+    return False
+
+
+async def _require_group_entitlement_msg(msg: Message, db: DB) -> bool:
+    if require_group_entitlement(db, msg.chat.id):
+        return True
+    await msg.answer(_subscription_required_notice())
+    return False
+
+
+def _parse_security_config(raw_config: Optional[str]) -> dict:
+    config = SECURITY_DEFAULTS.copy()
+    if not raw_config:
+        return config
+    try:
+        data = json.loads(raw_config)
+    except json.JSONDecodeError:
+        return config
+    if not isinstance(data, dict):
+        return config
+    if "anti_link" in data:
+        config["anti_link"] = bool(data["anti_link"])
+    if "anti_spam" in data:
+        config["anti_spam"] = bool(data["anti_spam"])
+    if "mute_seconds" in data:
+        try:
+            config["mute_seconds"] = int(data["mute_seconds"])
+        except (TypeError, ValueError):
+            pass
+    if "max_warnings" in data:
+        try:
+            config["max_warnings"] = int(data["max_warnings"])
+        except (TypeError, ValueError):
+            pass
+    return config
+
+
+def _render_security_settings_text(config: dict) -> str:
+    return (
+        "🛡 <b>Security Settings</b>\n\n"
+        f"Anti-link: {'On' if config['anti_link'] else 'Off'}\n"
+        f"Anti-spam: {'On' if config['anti_spam'] else 'Off'}\n"
+        f"Mute seconds: {config['mute_seconds']}\n"
+        f"Max warnings: {config['max_warnings']}\n\n"
+        "Use the buttons below to update the configuration."
+    )
+
+
 def _group_plan_button_text(plan_id: str, fallback: str) -> str:
     plan = GROUP_PLANS.get(plan_id)
     if not plan:
@@ -327,6 +394,9 @@ def kb_groupadmin(group: dict, subscription_info: dict, feature_enabled: bool):
     b.button(text="🧭 Mode", callback_data="ga:menu:mode")
     b.button(text=f"Warn threshold ({group.get('warn_threshold')})", callback_data="ga:menu:warn")
     b.button(text=f"Mute threshold ({group.get('mute_threshold')})", callback_data="ga:menu:mute")
+    b.button(text="✍️ Set Welcome Message", callback_data="ga:menu:set_welcome")
+    b.button(text="📜 Set Rules", callback_data="ga:menu:set_rules")
+    b.button(text="🛡 Set Security Settings", callback_data="ga:menu:security")
     b.button(
         text=f"Welcome {'On' if group.get('welcome_enabled') else 'Off'}",
         callback_data="ga:toggle:welcome_enabled",
@@ -354,7 +424,7 @@ def kb_groupadmin(group: dict, subscription_info: dict, feature_enabled: bool):
             callback_data="ga:buy:group_lifetime",
         )
     b.button(text=f"{EMOJIS['back']} Close", callback_data="ga:menu:close")
-    b.adjust(2, 2, 2, 2, 2, 2, 1)
+    b.adjust(2, 2, 2, 2, 2, 2, 2, 2, 1)
     return b.as_markup()
 
 
@@ -411,6 +481,34 @@ def kb_group_threshold_menu(threshold_type: str):
         b.button(text=str(value), callback_data=f"ga:{threshold_type}:{value}")
     b.button(text=f"{EMOJIS['back']} Back", callback_data="ga:menu:main")
     b.adjust(3, 3, 1)
+    return b.as_markup()
+
+
+def kb_group_text_prompt():
+    b = InlineKeyboardBuilder()
+    b.button(text=f"{EMOJIS['back']} Back", callback_data="ga:menu:main")
+    b.button(text="Cancel", callback_data="ga:flow:cancel")
+    b.adjust(2)
+    return b.as_markup()
+
+
+def kb_group_security_menu(config: dict):
+    b = InlineKeyboardBuilder()
+    link_prefix = "✅" if config.get("anti_link") else "❌"
+    spam_prefix = "✅" if config.get("anti_spam") else "❌"
+    b.button(text=f"{link_prefix} Anti-link", callback_data="ga:security:toggle:anti_link")
+    b.button(text=f"{spam_prefix} Anti-spam", callback_data="ga:security:toggle:anti_spam")
+    b.button(
+        text=f"⏱ Mute seconds ({config.get('mute_seconds')})",
+        callback_data="ga:security:set:mute_seconds",
+    )
+    b.button(
+        text=f"⚠️ Max warnings ({config.get('max_warnings')})",
+        callback_data="ga:security:set:max_warnings",
+    )
+    b.button(text=f"{EMOJIS['back']} Back", callback_data="ga:menu:main")
+    b.button(text="Cancel", callback_data="ga:flow:cancel")
+    b.adjust(2, 2, 2)
     return b.as_markup()
 
 
@@ -1047,6 +1145,7 @@ async def groupadmin_handler(cb: CallbackQuery, bot: Bot, db: DB, state: FSMCont
         await cb.answer()
         return
     if action == "menu:main":
+        await state.clear()
         subscription_info = db.get_group_subscription_info(group_id)
         await _edit_message(
             cb.message,
@@ -1054,6 +1153,16 @@ async def groupadmin_handler(cb: CallbackQuery, bot: Bot, db: DB, state: FSMCont
             reply_markup=kb_groupadmin(group, subscription_info, settings.feature_v2_groups),
         )
         await cb.answer()
+        return
+    if action == "flow:cancel":
+        await state.clear()
+        subscription_info = db.get_group_subscription_info(group_id)
+        await _edit_message(
+            cb.message,
+            render_groupadmin_text(group, subscription_info, settings.feature_v2_groups),
+            reply_markup=kb_groupadmin(group, subscription_info, settings.feature_v2_groups),
+        )
+        await cb.answer("Canceled.")
         return
     if action == "menu:language":
         await _edit_message(cb.message, "Choose group language:", reply_markup=kb_group_language_menu())
@@ -1088,6 +1197,82 @@ async def groupadmin_handler(cb: CallbackQuery, bot: Bot, db: DB, state: FSMCont
             "Ask a question about this group's moderation history.",
             reply_markup=kb_group_rag_menu(window_key, filter_key),
         )
+        await cb.answer()
+        return
+    if action == "menu:set_welcome":
+        if not await _require_group_entitlement_cb(cb, db, group_id):
+            return
+        await state.clear()
+        await state.update_data(group_id=group_id)
+        await state.set_state(Flow.waiting_for_welcome_message)
+        await _edit_message(
+            cb.message,
+            "Send the welcome message text to save for this group.",
+            reply_markup=kb_group_text_prompt(),
+        )
+        await cb.answer()
+        return
+    if action == "menu:set_rules":
+        if not await _require_group_entitlement_cb(cb, db, group_id):
+            return
+        await state.clear()
+        await state.update_data(group_id=group_id)
+        await state.set_state(Flow.waiting_for_rules_text)
+        await _edit_message(
+            cb.message,
+            "Send the rules text to save for this group.",
+            reply_markup=kb_group_text_prompt(),
+        )
+        await cb.answer()
+        return
+    if action == "menu:security":
+        if not await _require_group_entitlement_cb(cb, db, group_id):
+            return
+        await state.clear()
+        config = _parse_security_config(group.get("security_config_json"))
+        await _edit_message(
+            cb.message,
+            _render_security_settings_text(config),
+            reply_markup=kb_group_security_menu(config),
+        )
+        await cb.answer()
+        return
+    if action.startswith("security:toggle:"):
+        if not await _require_group_entitlement_cb(cb, db, group_id):
+            return
+        key = action.split(":", 2)[2]
+        if key not in {"anti_link", "anti_spam"}:
+            await cb.answer("Unknown security option.")
+            return
+        config = _parse_security_config(group.get("security_config_json"))
+        config[key] = not bool(config.get(key))
+        db.set_group_security_config(group_id, json.dumps(config))
+        db.record_audit_event(
+            chat_id=group_id,
+            actor_user_id=cb.from_user.id,
+            action="group_setting_update",
+            reason="security_config",
+            metadata={"field": key, "new": config[key]},
+        )
+        await _edit_message(
+            cb.message,
+            _render_security_settings_text(config),
+            reply_markup=kb_group_security_menu(config),
+        )
+        await cb.answer("Updated.")
+        return
+    if action.startswith("security:set:"):
+        if not await _require_group_entitlement_cb(cb, db, group_id):
+            return
+        field = action.split(":", 2)[2]
+        if field not in {"mute_seconds", "max_warnings"}:
+            await cb.answer("Unknown security option.")
+            return
+        await state.clear()
+        await state.update_data(group_id=group_id, security_field=field)
+        await state.set_state(Flow.waiting_for_security_value)
+        prompt = "Send the mute duration in seconds." if field == "mute_seconds" else "Send the max warnings count."
+        await _edit_message(cb.message, prompt, reply_markup=kb_group_text_prompt())
         await cb.answer()
         return
     if action == "toggle_enabled":
@@ -1312,6 +1497,148 @@ async def groupadmin_handler(cb: CallbackQuery, bot: Bot, db: DB, state: FSMCont
         reply_markup=kb_groupadmin(group, subscription_info, settings.feature_v2_groups),
     )
     await cb.answer("Saved.")
+
+
+@router.message(Flow.waiting_for_welcome_message)
+async def on_group_welcome_message(msg: Message, state: FSMContext, bot: Bot, db: DB):
+    if msg.chat.type not in {"group", "supergroup"}:
+        await msg.answer("This action can only be used in groups.")
+        return
+    if not await is_group_admin(bot, msg.chat.id, msg.from_user.id):
+        await msg.answer("This command is restricted to group admins.")
+        return
+    if not msg.text:
+        await msg.answer("Please send the welcome message as text.")
+        return
+    if not await _require_group_entitlement_msg(msg, db):
+        await state.clear()
+        return
+
+    text = msg.text.strip()
+    if not text:
+        await msg.answer("Please send the welcome message as text.")
+        return
+    if len(text) > WELCOME_MAX_LENGTH:
+        await msg.answer(f"Welcome message is too long (max {WELCOME_MAX_LENGTH} characters).")
+        return
+
+    db.set_group_welcome_text(msg.chat.id, text)
+    db.record_audit_event(
+        chat_id=msg.chat.id,
+        actor_user_id=msg.from_user.id,
+        action="group_setting_update",
+        reason="welcome_text",
+        metadata={"length": len(text)},
+    )
+    await msg.answer("✅ Welcome message saved.")
+    group = db.get_group_settings(msg.chat.id)
+    subscription_info = db.get_group_subscription_info(msg.chat.id)
+    await msg.answer(
+        render_groupadmin_text(group, subscription_info, settings.feature_v2_groups),
+        reply_markup=kb_groupadmin(group, subscription_info, settings.feature_v2_groups),
+    )
+    await state.clear()
+
+
+@router.message(Flow.waiting_for_rules_text)
+async def on_group_rules_message(msg: Message, state: FSMContext, bot: Bot, db: DB):
+    if msg.chat.type not in {"group", "supergroup"}:
+        await msg.answer("This action can only be used in groups.")
+        return
+    if not await is_group_admin(bot, msg.chat.id, msg.from_user.id):
+        await msg.answer("This command is restricted to group admins.")
+        return
+    if not msg.text:
+        await msg.answer("Please send the rules text as text.")
+        return
+    if not await _require_group_entitlement_msg(msg, db):
+        await state.clear()
+        return
+
+    text = msg.text.strip()
+    if not text:
+        await msg.answer("Please send the rules text as text.")
+        return
+    if len(text) > RULES_MAX_LENGTH:
+        await msg.answer(f"Rules text is too long (max {RULES_MAX_LENGTH} characters).")
+        return
+
+    db.set_group_rules_text(msg.chat.id, text)
+    db.record_audit_event(
+        chat_id=msg.chat.id,
+        actor_user_id=msg.from_user.id,
+        action="group_setting_update",
+        reason="rules_text",
+        metadata={"length": len(text)},
+    )
+    await msg.answer("✅ Rules text saved.")
+    group = db.get_group_settings(msg.chat.id)
+    subscription_info = db.get_group_subscription_info(msg.chat.id)
+    await msg.answer(
+        render_groupadmin_text(group, subscription_info, settings.feature_v2_groups),
+        reply_markup=kb_groupadmin(group, subscription_info, settings.feature_v2_groups),
+    )
+    await state.clear()
+
+
+@router.message(Flow.waiting_for_security_value)
+async def on_group_security_value(msg: Message, state: FSMContext, bot: Bot, db: DB):
+    if msg.chat.type not in {"group", "supergroup"}:
+        await msg.answer("This action can only be used in groups.")
+        return
+    if not await is_group_admin(bot, msg.chat.id, msg.from_user.id):
+        await msg.answer("This command is restricted to group admins.")
+        return
+    if not msg.text:
+        await msg.answer("Please send a numeric value.")
+        return
+    if not await _require_group_entitlement_msg(msg, db):
+        await state.clear()
+        return
+
+    data = await state.get_data()
+    field = data.get("security_field")
+    if field not in {"mute_seconds", "max_warnings"}:
+        await msg.answer("Unknown security setting.")
+        await state.clear()
+        return
+
+    try:
+        value = int(msg.text.strip())
+    except ValueError:
+        await msg.answer("Please send a whole number.")
+        return
+
+    if field == "mute_seconds":
+        min_val, max_val = SECURITY_MUTE_RANGE
+        if value < min_val or value > max_val:
+            await msg.answer(f"Mute seconds must be between {min_val} and {max_val}.")
+            return
+    else:
+        min_val, max_val = SECURITY_WARNING_RANGE
+        if value < min_val or value > max_val:
+            await msg.answer(f"Max warnings must be between {min_val} and {max_val}.")
+            return
+
+    group = db.get_group_settings(msg.chat.id)
+    config = _parse_security_config(group.get("security_config_json"))
+    config[field] = value
+    db.set_group_security_config(msg.chat.id, json.dumps(config))
+    db.record_audit_event(
+        chat_id=msg.chat.id,
+        actor_user_id=msg.from_user.id,
+        action="group_setting_update",
+        reason="security_config",
+        metadata={"field": field, "new": value},
+    )
+    await msg.answer("✅ Security settings updated.")
+    group = db.get_group_settings(msg.chat.id)
+    subscription_info = db.get_group_subscription_info(msg.chat.id)
+    await msg.answer(
+        render_groupadmin_text(group, subscription_info, settings.feature_v2_groups),
+        reply_markup=kb_groupadmin(group, subscription_info, settings.feature_v2_groups),
+    )
+    await state.clear()
 
 
 @router.message(Flow.waiting_for_group_rag)

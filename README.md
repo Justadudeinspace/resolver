@@ -129,6 +129,8 @@ Group moderation is admin-only and requires:
 2) Group enabled in `/groupadmin`
 3) An active subscription
 
+The group admin panel also lets admins set welcome messages, rules text, and security settings per group.
+
 Plans:
 - Monthly: 20 ⭐ → 30 days
 - Yearly: 100 ⭐ → 365 days

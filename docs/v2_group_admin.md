@@ -21,6 +21,9 @@ Controls:
 - Set language
 - Set language mode (Clean / Adult / Unrestricted)
 - Configure escalation thresholds (warn / mute)
+- Set welcome message text
+- Set rules text
+- Configure security settings (anti-link, anti-spam, mute seconds, max warnings)
 - Toggle welcome messages
 - Toggle rules message
 - Toggle security features (anti-flood)
@@ -35,8 +38,11 @@ Defaults are stored per `chat_id`:
 - `warn_threshold = 2`
 - `mute_threshold = 3`
 - `welcome_enabled = false`
+- `welcome_text = ""`
 - `rules_enabled = false`
+- `rules_text = ""`
 - `security_enabled = false`
+- `security_config_json = "{}"`
 
 ## Subscription gating
 Group moderation requires an active subscription:
