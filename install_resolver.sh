@@ -410,11 +410,18 @@ install_python_deps() {
 
     local pip_cmd
     if [ "$USE_VENV" = "true" ]; then
-        "$VENV_PYTHON" -m pip install -U pip
+        if ! "$VENV_PYTHON" -m pip install -U pip; then
+            print_error "Failed to upgrade pip in the virtual environment."
+            exit 1
+        fi
         pip_cmd=("$VENV_PYTHON" -m pip install -r requirements.txt)
     else
         pip_cmd=("$PY_BIN" -m pip install --user -r requirements.txt)
     fi
+
+    local log_dir="logs"
+    local log_file="${log_dir}/install_requirements.log"
+    mkdir -p "$log_dir"
 
     local marker_file=".requirements.hash"
     local current_hash
@@ -430,7 +437,10 @@ install_python_deps() {
         fi
     fi
 
-    "${pip_cmd[@]}"
+    if ! "${pip_cmd[@]}" 2>&1 | tee "$log_file"; then
+        print_error "Python requirements installation failed. Review ${log_file} for details."
+        exit 1
+    fi
 
     if [ -n "$current_hash" ]; then
         echo "$current_hash" > "$marker_file"
