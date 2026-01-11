@@ -1,7 +1,7 @@
 # V2 Group Admin (PLUS)
 
 ## Overview
-Resolver v2 group moderation is **opt-in** and **admin-only**. Group functionality is gated by a paid subscription and is disabled by default.
+Resolver v2 group moderation is **opt-in** and **admin-only**. Group functionality is gated by a paid subscription and is disabled by default. All group features are paid and the entitlement is per-group.
 
 ## Enable V2 group mode
 1. Set `FEATURE_V2_GROUPS=true` in your environment.
@@ -54,7 +54,9 @@ Group moderation requires an active subscription:
 Group subscriptions are billed via Telegram Stars using the canonical pricing in `app/payments.py`:
 - Monthly: 20 ⭐ → 30 days
 - Yearly: 100 ⭐ → 365 days
-- Lifetime: 1000 ⭐ → no expiry
+- Lifetime: 1000 ⭐ → permanent
+
+Lifetime is intentionally premium, must be explicitly chosen, and is never a default option.
 
 ## Moderation ladder (group mode)
 Detect → De-escalate → Warn → Temp mute → Notify admins

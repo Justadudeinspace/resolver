@@ -53,9 +53,17 @@ GOAL_PROMPTS: Dict[str, str] = {
 
 PRICING_TEXT = (
     f"{EMOJIS['buy']} <b>Pricing</b>\n\n"
+    "<b>Personal (DM)</b>\n"
+    "🎁 1 Stabilize per day (free)\n"
     "⭐ <b>5 Stars</b> → 1 Resolve\n"
     "⭐ <b>20 Stars</b> → 5 Resolves\n"
     "⭐ <b>50 Stars</b> → 15 Resolves\n\n"
+    "<i>No subscriptions or lifetime for Personal.</i>\n\n"
+    "<b>Group (PLUS, per-group)</b>\n"
+    "⭐ Monthly — 20 Stars\n"
+    "⭐ Yearly — 100 Stars\n"
+    "⭐ Lifetime — 1000 Stars (permanent)\n"
+    "<i>All group features are paid. Admins purchase via /groupadmin.</i>\n\n"
     "<i>Pay with Telegram Stars. Tap a plan to open a Stars invoice.</i>\n"
     "<i>Resolves are added only after successful payment.</i>"
 )
@@ -69,7 +77,7 @@ HELP_TEXT = (
     "<b>Commands:</b>\n"
     "/start — main menu\n"
     "/resolve — choose a goal and resolve\n"
-    "/pricing — view Stars plans\n"
+    "/pricing — view Personal and Group pricing\n"
     "/buy — purchase a plan\n"
     "/account — usage and resolves\n"
     "/settings — defaults + language (v2 personal)\n"
@@ -118,7 +126,7 @@ ERROR_MESSAGES = {
 BOT_COMMANDS = [
     ("start", "Begin. Choose a goal and resolve a message."),
     ("resolve", "Resolve a message by choosing a goal and getting clear options."),
-    ("pricing", "View resolve pricing and Star bundles."),
+    ("pricing", "View Personal and Group pricing."),
     ("buy", "Purchase resolve bundles with Stars."),
     ("account", "View your remaining resolves and usage."),
     ("settings", "Set defaults and language (v2 personal)."),
