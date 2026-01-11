@@ -89,12 +89,6 @@ is_termux_native() {
 }
 
 is_proot_distro() {
-    if [ -z "${ANDROID_ROOT-}" ]; then
-        return 1
-    fi
-    if [ -z "$(getprop_value ro.product.model)" ]; then
-        return 1
-    fi
     if [ -n "${PREFIX-}" ] && [[ "$PREFIX" == /data/data/com.termux/files/usr* ]]; then
         return 1
     fi
@@ -104,10 +98,16 @@ is_proot_distro() {
     if ! grep -Eq "^ID=(debian|ubuntu)$" /etc/os-release; then
         return 1
     fi
-    if ! grep -Eq "Android" /proc/version 2>/dev/null; then
-        return 1
+    if uname -r 2>/dev/null | grep -q "Android"; then
+        return 0
     fi
-    return 0
+    if grep -Eq "Android" /proc/version 2>/dev/null; then
+        return 0
+    fi
+    if [ -x /usr/bin/proot ] || grep -q "TracerPid" /proc/self/status 2>/dev/null; then
+        return 0
+    fi
+    return 1
 }
 
 is_wsl() {
@@ -153,6 +153,14 @@ detect_env() {
     if [ "$android" = "true" ] && [ "$ENVIRONMENT" = "LINUX" ]; then
         print_error "Android detected but not Termux native or a supported proot Debian/Ubuntu."
         print_error "Run this script inside the Termux app or a Termux proot-distro Debian/Ubuntu container."
+        print_error "Debug: uname -a -> $(uname -a 2>/dev/null || echo 'unavailable')"
+        if [ -f /etc/os-release ]; then
+            print_error "Debug: /etc/os-release ->"
+            sed 's/^/  /' /etc/os-release >&2
+        else
+            print_error "Debug: /etc/os-release -> missing"
+        fi
+        print_error "Debug: PREFIX='${PREFIX-}'"
         exit 1
     fi
 
