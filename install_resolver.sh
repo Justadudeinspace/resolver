@@ -38,13 +38,6 @@ command_exists() {
     command -v "$1" >/dev/null 2>&1
 }
 
-is_termux() {
-    [ -n "${TERMUX_VERSION-}" ] \
-        || command_exists termux-info \
-        || [ "${PREFIX-}" = "/data/data/com.termux/files/usr" ] \
-        || [[ "${PATH-}" == *"/data/data/com.termux/files/usr/bin"* ]]
-}
-
 is_wsl() {
     [ -n "${WSL_INTEROP-}" ] || grep -qi microsoft /proc/version 2>/dev/null
 }
@@ -67,6 +60,10 @@ print_banner() {
 detect_env() {
     local has_pkg="false"
     local has_apt="false"
+    local termux="false"
+    local termux_reason=""
+    local env_reason=""
+    local prefer_termux="false"
 
     if command_exists pkg; then
         has_pkg="true"
@@ -75,14 +72,45 @@ detect_env() {
         has_apt="true"
     fi
 
+    if [ -d "/data/data/com.termux/files/usr" ]; then
+        termux="true"
+        termux_reason="TERMUX dir exists"
+    elif [ -n "${PREFIX-}" ] && [[ "$PREFIX" == /data/data/com.termux/files/usr* ]]; then
+        termux="true"
+        termux_reason="PREFIX=${PREFIX}"
+    elif command_exists termux-info; then
+        termux="true"
+        termux_reason="termux-info in PATH"
+    elif [ -n "${TERMUX_VERSION-}" ]; then
+        termux="true"
+        termux_reason="TERMUX_VERSION set"
+    fi
+
+    if [ -d "/data/data/com.termux/files/usr" ] || { [ -n "${PREFIX-}" ] && [[ "$PREFIX" == /data/data/com.termux/files/usr* ]]; }; then
+        prefer_termux="true"
+    fi
+
+    if [ "$has_pkg" = "true" ] && [ "$has_apt" = "true" ]; then
+        if [ "$prefer_termux" = "true" ]; then
+            termux="true"
+            termux_reason="pkg+apt present; Termux path detected"
+        else
+            termux="false"
+        fi
+    fi
+
     if is_macos; then
-        ENVIRONMENT="MACOS/BREW"
-    elif is_termux; then
+        ENVIRONMENT="MACOS"
+        env_reason="uname=Darwin"
+    elif [ "$termux" = "true" ]; then
         ENVIRONMENT="TERMUX"
+        env_reason="$termux_reason"
     elif [ "$has_apt" = "true" ]; then
-        ENVIRONMENT="DEBIAN/APT"
+        ENVIRONMENT="DEBIAN_APT"
+        env_reason="apt-get available"
     else
         ENVIRONMENT="UNKNOWN"
+        env_reason="no package manager detected"
     fi
 
     WSL="false"
@@ -90,7 +118,7 @@ detect_env() {
         WSL="true"
     fi
 
-    print_info "Detected: ${ENVIRONMENT}"
+    print_info "Detected environment: ${ENVIRONMENT} because ${env_reason}"
     if [ "$WSL" = "true" ]; then
         print_info "Environment detail: WSL"
     fi
@@ -129,13 +157,13 @@ update_system() {
             pkg update -y
             pkg upgrade -y
             ;;
-        DEBIAN/APT)
+        DEBIAN_APT)
             local sudo_cmd
             sudo_cmd="$(get_sudo_cmd)"
             ${sudo_cmd} apt-get update -y
             ${sudo_cmd} apt-get upgrade -y
             ;;
-        MACOS/BREW)
+        MACOS)
             require_command brew "Homebrew not found. Install it from https://brew.sh and re-run."
             brew update
             ;;
@@ -156,12 +184,12 @@ install_system_deps() {
         TERMUX)
             pkg install -y python git openssl libffi
             ;;
-        DEBIAN/APT)
+        DEBIAN_APT)
             local sudo_cmd
             sudo_cmd="$(get_sudo_cmd)"
             ${sudo_cmd} apt-get install -y python3 python3-venv python3-pip git sqlite3
             ;;
-        MACOS/BREW)
+        MACOS)
             require_command brew "Homebrew not found. Install it from https://brew.sh and re-run."
             brew install python git sqlite
             ;;
@@ -210,6 +238,9 @@ setup_python_env() {
 
     select_python
     ensure_python_version "$PYTHON_BIN"
+    if [ "$ENVIRONMENT" = "TERMUX" ]; then
+        print_info "Using Python executable: $PYTHON_BIN"
+    fi
 
     VENV_DIR=".venv"
     VENV_PYTHON="$PYTHON_BIN"
@@ -356,8 +387,18 @@ PY
 }
 
 main() {
+    local detect_only="false"
+    for arg in "$@"; do
+        if [ "$arg" = "--detect-only" ]; then
+            detect_only="true"
+        fi
+    done
+
     print_banner
     detect_env
+    if [ "$detect_only" = "true" ]; then
+        return 0
+    fi
 
     update_system
     install_system_deps
