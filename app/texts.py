@@ -75,7 +75,7 @@ HELP_TEXT = (
     "/settings — defaults + language (v2 personal)\n"
     "/groupadmin — group settings (admins only)\n"
     "/grouplogs — moderation logs (admins only)\n"
-    "Use the group admin panel for audit/RAG queries.\n"
+    "Use the group admin panel for welcome/rules/security settings and audit/RAG queries.\n"
     "/help — this screen\n"
     "/feedback — send feedback\n\n"
     "<b>Payments:</b>\n"

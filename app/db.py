@@ -77,8 +77,11 @@ CREATE TABLE IF NOT EXISTS groups (
     warn_threshold INTEGER NOT NULL DEFAULT 2,
     mute_threshold INTEGER NOT NULL DEFAULT 3,
     welcome_enabled INTEGER NOT NULL DEFAULT 0,
+    welcome_text TEXT,
     rules_enabled INTEGER NOT NULL DEFAULT 0,
+    rules_text TEXT,
     security_enabled INTEGER NOT NULL DEFAULT 0,
+    security_config_json TEXT,
     created_at INTEGER DEFAULT CURRENT_TIMESTAMP
 );
 
@@ -236,8 +239,11 @@ class DB:
             "warn_threshold": "INTEGER NOT NULL DEFAULT 2",
             "mute_threshold": "INTEGER NOT NULL DEFAULT 3",
             "welcome_enabled": "INTEGER NOT NULL DEFAULT 0",
+            "welcome_text": "TEXT",
             "rules_enabled": "INTEGER NOT NULL DEFAULT 0",
+            "rules_text": "TEXT",
             "security_enabled": "INTEGER NOT NULL DEFAULT 0",
+            "security_config_json": "TEXT",
         }
         for column, column_type in missing_columns.items():
             if column not in existing:
@@ -250,8 +256,11 @@ class DB:
         conn.execute("UPDATE groups SET warn_threshold = 2 WHERE warn_threshold IS NULL")
         conn.execute("UPDATE groups SET mute_threshold = 3 WHERE mute_threshold IS NULL")
         conn.execute("UPDATE groups SET welcome_enabled = 0 WHERE welcome_enabled IS NULL")
+        conn.execute("UPDATE groups SET welcome_text = '' WHERE welcome_text IS NULL")
         conn.execute("UPDATE groups SET rules_enabled = 0 WHERE rules_enabled IS NULL")
+        conn.execute("UPDATE groups SET rules_text = '' WHERE rules_text IS NULL")
         conn.execute("UPDATE groups SET security_enabled = 0 WHERE security_enabled IS NULL")
+        conn.execute("UPDATE groups SET security_config_json = '{}' WHERE security_config_json IS NULL")
 
     @contextmanager
     def _conn(self):
@@ -440,8 +449,11 @@ class DB:
             "warn_threshold": 2,
             "mute_threshold": 3,
             "welcome_enabled": 0,
+            "welcome_text": "",
             "rules_enabled": 0,
+            "rules_text": "",
             "security_enabled": 0,
+            "security_config_json": "{}",
         }
         group = self.get_group(group_id)
         for key, value in defaults.items():
@@ -489,6 +501,30 @@ class DB:
             conn.execute(
                 f"UPDATE groups SET {field} = ? WHERE group_id = ?",
                 (1 if enabled else 0, group_id),
+            )
+
+    def set_group_welcome_text(self, group_id: int, welcome_text: str) -> None:
+        with self._conn() as conn:
+            self._ensure_group_conn(conn, group_id)
+            conn.execute(
+                "UPDATE groups SET welcome_text = ? WHERE group_id = ?",
+                (welcome_text, group_id),
+            )
+
+    def set_group_rules_text(self, group_id: int, rules_text: str) -> None:
+        with self._conn() as conn:
+            self._ensure_group_conn(conn, group_id)
+            conn.execute(
+                "UPDATE groups SET rules_text = ? WHERE group_id = ?",
+                (rules_text, group_id),
+            )
+
+    def set_group_security_config(self, group_id: int, config_json: str) -> None:
+        with self._conn() as conn:
+            self._ensure_group_conn(conn, group_id)
+            conn.execute(
+                "UPDATE groups SET security_config_json = ? WHERE group_id = ?",
+                (config_json, group_id),
             )
 
     def increment_violations(self, group_id: int, user_id: int, ts: int) -> int:
