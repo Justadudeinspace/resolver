@@ -106,7 +106,7 @@ ERROR_MESSAGES = {
     ),
     "config_missing": (
         "⚠️ <b>Configuration missing</b>\n\n"
-        "Please set BOT_TOKEN and INVOICE_SECRET in .env."
+        "Please set BOT_TOKEN in .env."
     ),
     "generic": (
         "⚠️ <b>Something went wrong</b>\n\n"

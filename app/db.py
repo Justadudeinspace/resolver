@@ -2,6 +2,7 @@ import json
 import logging
 import os
 import sqlite3
+import time
 from contextlib import contextmanager
 from datetime import date, datetime
 from typing import Optional, Dict, Any, List
@@ -109,6 +110,17 @@ CREATE TABLE IF NOT EXISTS group_subscriptions (
     stars_amount INTEGER NOT NULL,
     transaction_id TEXT NOT NULL UNIQUE,
     created_at INTEGER DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS invoices (
+    invoice_id TEXT PRIMARY KEY,
+    user_id INTEGER NOT NULL,
+    plan_id TEXT NOT NULL,
+    amount INTEGER NOT NULL,
+    currency TEXT NOT NULL,
+    status TEXT NOT NULL,
+    created_at INTEGER NOT NULL,
+    telegram_charge_id TEXT UNIQUE
 );
 """
 
@@ -493,6 +505,157 @@ class DB:
             )
             return cursor.rowcount == 1
 
+    def create_invoice(
+        self,
+        invoice_id: str,
+        user_id: int,
+        plan_id: str,
+        amount: int,
+        currency: str,
+    ) -> bool:
+        with self._conn() as conn:
+            cursor = conn.execute(
+                """
+                INSERT OR IGNORE INTO invoices
+                (invoice_id, user_id, plan_id, amount, currency, status, created_at)
+                VALUES (?, ?, ?, ?, ?, 'created', ?)
+                """,
+                (invoice_id, user_id, plan_id, amount, currency, int(time.time())),
+            )
+            return cursor.rowcount == 1
+
+    def get_invoice(self, invoice_id: str) -> Optional[Dict[str, Any]]:
+        with self._conn() as conn:
+            cursor = conn.execute(
+                "SELECT * FROM invoices WHERE invoice_id = ?",
+                (invoice_id,),
+            )
+            row = cursor.fetchone()
+            return dict(row) if row else None
+
+    def process_invoice_payment(
+        self,
+        invoice_id: str,
+        telegram_charge_id: str,
+        user_id: int,
+        stars_amount: int,
+        resolves_added: int,
+    ) -> str:
+        with self._conn() as conn:
+            if not telegram_charge_id:
+                logger.warning("Missing Telegram charge id for invoice %s", invoice_id)
+                return "invalid"
+
+            cursor = conn.execute(
+                "SELECT 1 FROM invoices WHERE telegram_charge_id = ?",
+                (telegram_charge_id,),
+            )
+            if cursor.fetchone():
+                return "duplicate"
+
+            cursor = conn.execute(
+                "SELECT 1 FROM purchases WHERE transaction_id = ?",
+                (telegram_charge_id,),
+            )
+            if cursor.fetchone():
+                return "duplicate"
+
+            row = conn.execute(
+                "SELECT status FROM invoices WHERE invoice_id = ?",
+                (invoice_id,),
+            ).fetchone()
+            if not row or row["status"] != "created":
+                return "invalid"
+
+            cursor = conn.execute(
+                """
+                UPDATE invoices
+                SET status = 'paid', telegram_charge_id = ?
+                WHERE invoice_id = ? AND status = 'created'
+                """,
+                (telegram_charge_id, invoice_id),
+            )
+            if cursor.rowcount != 1:
+                return "invalid"
+
+            self._ensure_user_conn(conn, user_id)
+            cursor = conn.execute(
+                """
+                INSERT OR IGNORE INTO purchases
+                (user_id, stars_amount, resolves_added, transaction_id)
+                VALUES (?, ?, ?, ?)
+                """,
+                (user_id, stars_amount, resolves_added, telegram_charge_id),
+            )
+            if cursor.rowcount == 0:
+                return "duplicate"
+
+            conn.execute(
+                "UPDATE users SET resolves_remaining = resolves_remaining + ? WHERE user_id = ?",
+                (resolves_added, user_id),
+            )
+            return "processed"
+
+    def process_group_invoice_payment(
+        self,
+        invoice_id: str,
+        telegram_charge_id: str,
+        group_id: int,
+        plan_id: str,
+        stars_amount: int,
+        start_ts: int,
+        end_ts: Optional[int],
+    ) -> str:
+        with self._conn() as conn:
+            if not telegram_charge_id:
+                logger.warning("Missing Telegram charge id for group invoice %s", invoice_id)
+                return "invalid"
+
+            cursor = conn.execute(
+                "SELECT 1 FROM invoices WHERE telegram_charge_id = ?",
+                (telegram_charge_id,),
+            )
+            if cursor.fetchone():
+                return "duplicate"
+
+            cursor = conn.execute(
+                "SELECT 1 FROM group_subscriptions WHERE transaction_id = ?",
+                (telegram_charge_id,),
+            )
+            if cursor.fetchone():
+                return "duplicate"
+
+            row = conn.execute(
+                "SELECT status FROM invoices WHERE invoice_id = ?",
+                (invoice_id,),
+            ).fetchone()
+            if not row or row["status"] != "created":
+                return "invalid"
+
+            cursor = conn.execute(
+                """
+                UPDATE invoices
+                SET status = 'paid', telegram_charge_id = ?
+                WHERE invoice_id = ? AND status = 'created'
+                """,
+                (telegram_charge_id, invoice_id),
+            )
+            if cursor.rowcount != 1:
+                return "invalid"
+
+            cursor = conn.execute(
+                """
+                INSERT OR IGNORE INTO group_subscriptions
+                (group_id, plan_id, stars_amount, transaction_id, start_ts, end_ts, status)
+                VALUES (?, ?, ?, ?, ?, ?, 'active')
+                """,
+                (group_id, plan_id, stars_amount, telegram_charge_id, start_ts, end_ts),
+            )
+            if cursor.rowcount == 0:
+                return "duplicate"
+
+            return "processed"
+
     def group_subscription_active(self, group_id: int) -> bool:
         now = int(datetime.utcnow().timestamp())
         with self._conn() as conn:
@@ -699,7 +862,7 @@ class DB:
         try:
             with self._conn() as conn:
                 cursor = conn.execute(
-                    "SELECT name FROM sqlite_master WHERE type='table' AND name IN (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    "SELECT name FROM sqlite_master WHERE type='table' AND name IN (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                     (
                         "users",
                         "retry_flags",
@@ -710,10 +873,11 @@ class DB:
                         "group_user_state",
                         "moderation_log",
                         "group_subscriptions",
+                        "invoices",
                     ),
                 )
                 tables_found = {row["name"] for row in cursor.fetchall()}
-                return len(tables_found) == 9
+                return len(tables_found) == 10
         except Exception as exc:
             logger.error("Database health check failed: %s", exc)
             return False

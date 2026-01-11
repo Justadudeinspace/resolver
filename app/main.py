@@ -47,11 +47,6 @@ async def main() -> None:
         print(ERROR_MESSAGES["config_missing"])
         return
 
-    if not settings.invoice_secret_valid:
-        logger.error("INVOICE_SECRET is missing or too short; payments require a 32+ char secret.")
-        print(ERROR_MESSAGES["config_missing"])
-        return
-
     db = DB(settings.db_path)
     bot = Bot(
         token=settings.bot_token,
