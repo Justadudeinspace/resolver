@@ -114,7 +114,7 @@ Group moderation is admin-only and requires:
 Plans:
 - Monthly: 20 ⭐ → 30 days
 - Yearly: 100 ⭐ → 365 days
-- Lifetime: 500 ⭐ → no expiry
+- Lifetime: 1000 ⭐ → no expiry
 
 ## Moderation Ladder (V2 Groups)
 When entitled, triggers follow:
