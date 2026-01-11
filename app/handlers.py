@@ -99,6 +99,35 @@ def _create_invoice_record(
     return None
 
 
+def _should_allow_xtr_amount(plan_id: str, plan_stars: int, amount: int, currency: str) -> bool:
+    if currency == "XTR" and plan_stars < 1000 and amount >= 1000:
+        logger.warning(
+            "Pricing misconfigured: plan_id=%s plan_stars=%s amount=%s currency=%s",
+            plan_id,
+            plan_stars,
+            amount,
+            currency,
+        )
+        return False
+    return True
+
+
+def _amount_from_total(total_amount: int, currency: str) -> int:
+    if currency == "XTR":
+        return total_amount
+    return total_amount // 100
+
+
+async def _pre_checkout_fail(pre_checkout_query: PreCheckoutQuery, reason: str) -> None:
+    logger.info(
+        "Pre-checkout validation: ok=%s payload=%s reason=%s",
+        False,
+        pre_checkout_query.invoice_payload,
+        reason,
+    )
+    await pre_checkout_query.answer(ok=False, error_message=reason)
+
+
 async def _edit_or_send(message: Message, text: str, reply_markup=None) -> None:
     try:
         await message.edit_text(text, reply_markup=reply_markup)
@@ -355,9 +384,12 @@ def kb_settings(user: dict, v2_personal_enabled: bool):
         mode_label = LANGUAGE_MODE_LABELS.get(user.get("language_mode", "clean"), "Clean")
         b.button(text=f"🌐 Language: {language_label}", callback_data="settings:menu:language")
         b.button(text=f"🧭 Mode: {mode_label}", callback_data="settings:menu:mode")
+    if settings.feature_v2_personal:
+        toggle_label = "Disable" if v2_personal_enabled else "Enable"
+        b.button(text=f"🧪 {toggle_label} V2 Personal", callback_data=f"settings:v2:{toggle_label.lower()}")
 
     b.button(text=f"{EMOJIS['back']} Main menu", callback_data="nav:goals")
-    b.adjust(3, 1, 2, 2, 2, 1)
+    b.adjust(3, 1, 2, 2, 2, 1, 1)
     return b.as_markup()
 
 
@@ -475,6 +507,9 @@ async def cmd_buy(msg: Message, command: CommandObject, bot: Bot, db: DB):
     plan_id = (command.args or "").strip().lower()
     if plan_id in PLANS:
         plan = PLANS[plan_id]
+        if not _should_allow_xtr_amount(plan.id, plan.stars, plan.stars, "XTR"):
+            await msg.answer("Pricing misconfigured. Please contact admin.")
+            return
         payload = _create_invoice_record(
             db=db,
             user_id=msg.from_user.id,
@@ -485,7 +520,13 @@ async def cmd_buy(msg: Message, command: CommandObject, bot: Bot, db: DB):
             await msg.answer("Failed to create invoice. Please try again.")
             return
 
-        prices = [LabeledPrice(label=f"{plan.resolves} Resolves", amount=plan.stars * 100)]
+        logger.info(
+            "Invoice created: plan_id=%s stars_amount=%s payload_len=%s",
+            plan.id,
+            plan.stars,
+            len(payload),
+        )
+        prices = [LabeledPrice(label=f"{plan.resolves} Resolves", amount=plan.stars)]
         try:
             await bot.send_invoice(
                 chat_id=msg.from_user.id,
@@ -543,7 +584,7 @@ async def cmd_settings(msg: Message, db: DB):
     user_id = msg.from_user.id
     db.ensure_user(user_id)
     user = db.get_user(user_id)
-    v2_personal_enabled = settings.feature_v2_personal
+    v2_personal_enabled = settings.feature_v2_personal and bool(user.get("v2_enabled"))
     await msg.answer(
         render_settings_text(user, v2_personal_enabled),
         reply_markup=kb_settings(user, v2_personal_enabled),
@@ -596,7 +637,7 @@ async def nav_handler(cb: CallbackQuery, state: FSMContext, db: DB):
         user_id = cb.from_user.id
         db.ensure_user(user_id)
         user = db.get_user(user_id)
-        v2_personal_enabled = settings.feature_v2_personal
+        v2_personal_enabled = settings.feature_v2_personal and bool(user.get("v2_enabled"))
         await _edit_or_send(
             cb.message,
             render_settings_text(user, v2_personal_enabled),
@@ -643,7 +684,8 @@ async def settings_handler(cb: CallbackQuery, db: DB):
     user_id = cb.from_user.id
     db.ensure_user(user_id)
 
-    v2_personal_enabled = settings.feature_v2_personal
+    user = db.get_user(user_id)
+    v2_personal_enabled = settings.feature_v2_personal and bool(user.get("v2_enabled"))
 
     if setting == "menu":
         if value == "language":
@@ -669,7 +711,6 @@ async def settings_handler(cb: CallbackQuery, db: DB):
             await cb.answer()
             return
         if value == "main":
-            user = db.get_user(user_id)
             await _edit_or_send(
                 cb.message,
                 render_settings_text(user, v2_personal_enabled),
@@ -689,6 +730,14 @@ async def settings_handler(cb: CallbackQuery, db: DB):
             await cb.answer("Unknown style option.")
             return
         db.set_default_style(user_id, style_value)
+    elif setting == "v2":
+        if not settings.feature_v2_personal:
+            await cb.answer("V2 personal is disabled.")
+            return
+        enable_v2 = value == "enable"
+        db.set_v2_enabled(user_id, enable_v2)
+        user = db.get_user(user_id)
+        v2_personal_enabled = settings.feature_v2_personal and bool(user.get("v2_enabled"))
     elif setting == "lang":
         if not v2_personal_enabled:
             await cb.answer("V2 personal is disabled.")
@@ -978,6 +1027,9 @@ async def groupadmin_handler(cb: CallbackQuery, bot: Bot, db: DB):
         if not plan:
             await cb.answer("Unknown plan.")
             return
+        if not _should_allow_xtr_amount(plan.id, plan.stars, plan.stars, "XTR"):
+            await cb.answer("Pricing misconfigured. Please contact admin.", show_alert=True)
+            return
         plan_key = build_group_plan_key(plan_id, group_id)
         payload = _create_invoice_record(
             db=db,
@@ -988,7 +1040,13 @@ async def groupadmin_handler(cb: CallbackQuery, bot: Bot, db: DB):
         if not payload:
             await cb.answer("Failed to create invoice. Please try again.")
             return
-        prices = [LabeledPrice(label=f"Group Subscription {plan.name}", amount=plan.stars * 100)]
+        logger.info(
+            "Invoice created: plan_id=%s stars_amount=%s payload_len=%s",
+            plan_key,
+            plan.stars,
+            len(payload),
+        )
+        prices = [LabeledPrice(label=f"Group Subscription {plan.name}", amount=plan.stars)]
         try:
             await bot.send_invoice(
                 chat_id=cb.from_user.id,
@@ -1104,6 +1162,9 @@ async def buy_handler(cb: CallbackQuery, bot: Bot, db: DB):
     if not plan:
         await cb.answer("Invalid purchase option.")
         return
+    if not _should_allow_xtr_amount(plan.id, plan.stars, plan.stars, "XTR"):
+        await cb.answer("Pricing misconfigured. Please contact admin.", show_alert=True)
+        return
 
     payload = _create_invoice_record(
         db=db,
@@ -1115,7 +1176,13 @@ async def buy_handler(cb: CallbackQuery, bot: Bot, db: DB):
         await cb.answer("Failed to create invoice. Please try again.")
         return
 
-    prices = [LabeledPrice(label=f"{plan.resolves} Resolves", amount=plan.stars * 100)]
+    logger.info(
+        "Invoice created: plan_id=%s stars_amount=%s payload_len=%s",
+        plan.id,
+        plan.stars,
+        len(payload),
+    )
+    prices = [LabeledPrice(label=f"{plan.resolves} Resolves", amount=plan.stars)]
 
     try:
         await bot.send_invoice(
@@ -1251,39 +1318,42 @@ async def pre_checkout(pre_checkout_query: PreCheckoutQuery, db: DB):
         payload = pre_checkout_query.invoice_payload
         invoice = db.get_invoice(payload)
         if not invoice:
-            await pre_checkout_query.answer(
-                ok=False, error_message="Invoice expired or invalid. Please try again."
+            await _pre_checkout_fail(
+                pre_checkout_query, "Invoice expired or invalid. Please try again."
             )
             return
 
         if invoice["status"] != "created":
-            await pre_checkout_query.answer(
-                ok=False, error_message="Invoice expired or invalid. Please try again."
+            await _pre_checkout_fail(
+                pre_checkout_query, "Invoice expired or invalid. Please try again."
             )
             return
 
         if int(invoice["user_id"]) != pre_checkout_query.from_user.id:
-            await pre_checkout_query.answer(
-                ok=False, error_message="Invoice expired or invalid. Please try again."
+            await _pre_checkout_fail(
+                pre_checkout_query, "Invoice expired or invalid. Please try again."
             )
             return
 
         now = int(time.time())
         if now - int(invoice["created_at"]) > INVOICE_TTL_SECONDS:
-            await pre_checkout_query.answer(
-                ok=False, error_message="Invoice expired or invalid. Please try again."
+            await _pre_checkout_fail(
+                pre_checkout_query, "Invoice expired or invalid. Please try again."
             )
             return
 
         if pre_checkout_query.currency != invoice["currency"]:
-            await pre_checkout_query.answer(
-                ok=False, error_message="Invoice expired or invalid. Please try again."
+            await _pre_checkout_fail(
+                pre_checkout_query, "Invoice expired or invalid. Please try again."
             )
             return
 
-        if pre_checkout_query.total_amount // 100 != int(invoice["amount"]):
-            await pre_checkout_query.answer(
-                ok=False, error_message="Invoice expired or invalid. Please try again."
+        total_amount = _amount_from_total(
+            pre_checkout_query.total_amount, pre_checkout_query.currency
+        )
+        if total_amount != int(invoice["amount"]):
+            await _pre_checkout_fail(
+                pre_checkout_query, "Invoice expired or invalid. Please try again."
             )
             return
 
@@ -1291,23 +1361,33 @@ async def pre_checkout(pre_checkout_query: PreCheckoutQuery, db: DB):
         if group_info:
             plan = GROUP_PLANS.get(group_info["plan_id"])
             if not plan or plan.stars != int(invoice["amount"]):
-                await pre_checkout_query.answer(
-                    ok=False, error_message="Invoice expired or invalid. Please try again."
+                await _pre_checkout_fail(
+                    pre_checkout_query, "Invoice expired or invalid. Please try again."
                 )
                 return
             db.ensure_group(int(group_info["group_id"]))
             await pre_checkout_query.answer(ok=True)
+            logger.info(
+                "Pre-checkout validation: ok=%s payload=%s",
+                True,
+                payload,
+            )
             return
 
         plan = PLANS.get(str(invoice["plan_id"]))
         if not plan or plan.stars != int(invoice["amount"]):
-            await pre_checkout_query.answer(
-                ok=False, error_message="Invoice expired or invalid. Please try again."
+            await _pre_checkout_fail(
+                pre_checkout_query, "Invoice expired or invalid. Please try again."
             )
             return
 
         db.ensure_user(int(invoice["user_id"]))
         await pre_checkout_query.answer(ok=True)
+        logger.info(
+            "Pre-checkout validation: ok=%s payload=%s",
+            True,
+            payload,
+        )
     except Exception as exc:
         logger.error("Pre-checkout error: %s", exc)
         await pre_checkout_query.answer(ok=False, error_message="Payment validation failed")
@@ -1342,7 +1422,7 @@ async def successful_payment(msg: Message, db: DB):
             await msg.answer("Payment verification failed. Please contact support.")
             return
 
-        stars_paid = payment.total_amount // 100
+        stars_paid = _amount_from_total(payment.total_amount, payment.currency)
         if stars_paid != int(invoice["amount"]):
             await msg.answer("Payment verification failed. Please contact support.")
             return
@@ -1426,6 +1506,11 @@ async def successful_payment(msg: Message, db: DB):
             msg.from_user.id,
             plan.id,
             charge_id_prefix,
+        )
+        logger.info(
+            "Payment credit granted: charge_id=%s resolves_added=%s",
+            transaction_id,
+            plan.resolves,
         )
     except Exception as exc:
         logger.error("Payment processing error: %s", exc)

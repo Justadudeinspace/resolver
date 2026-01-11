@@ -67,12 +67,14 @@ V2 features are opt-in. If the flags are missing, they default to `false`.
 
 - To enable V2 Personal:
   - Set `FEATURE_V2_PERSONAL=true`
+  - Users must opt in via the `/settings` toggle before v2 personal options appear.
 - To enable V2 Groups:
   - Set `FEATURE_V2_GROUPS=true`
 
 ## Telegram Stars Notes
 - Stars invoices require enabling **Stars** monetization in @BotFather.
 - The bot uses `currency="XTR"` and an empty `provider_token`.
+- XTR amounts are specified in whole Stars (no minor-unit scaling).
 - Buttons open Telegram Stars invoices, and resolves are added only after `successful_payment` validation.
 - Group subscriptions use separate Stars plans and activate only after `successful_payment`.
 

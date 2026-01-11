@@ -378,6 +378,15 @@ class DB:
                 (language_mode, user_id),
             )
 
+    def set_v2_enabled(self, user_id: int, enabled: bool) -> None:
+        """Enable or disable v2 features for a user"""
+        with self._conn() as conn:
+            self._ensure_user_conn(conn, user_id)
+            conn.execute(
+                "UPDATE users SET v2_enabled = ? WHERE user_id = ?",
+                (1 if enabled else 0, user_id),
+            )
+
     def ensure_group(self, group_id: int) -> None:
         """Ensure group exists"""
         with self._conn() as conn:
