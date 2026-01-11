@@ -4,8 +4,7 @@ set -euo pipefail
 # ============================================================================
 # THE RESOLVER BOT - INSTALLATION SCRIPT
 # ============================================================================
-# Author: Justadudeinspace
-# Cross-platform installation for Termux (Android), Linux, macOS, and Windows WSL
+# Cross-platform installation for Termux (Android), Linux, macOS, and WSL
 # ============================================================================
 
 if [ -t 1 ]; then
@@ -19,26 +18,40 @@ else
     RED=''; GREEN=''; YELLOW=''; CYAN=''; MAGENTA=''; NC=''
 fi
 
+CURRENT_STEP="startup"
+
 print_step() { echo -e "${MAGENTA}▶${NC} $1"; }
 print_info() { echo -e "${CYAN}➤${NC} $1"; }
 print_success() { echo -e "${GREEN}✓${NC} $1"; }
 print_warning() { echo -e "${YELLOW}⚠${NC} $1"; }
 print_error() { echo -e "${RED}✗${NC} $1"; }
 
-# Detect platform
-if [ -f /system/build.prop ] && [ -d /data/data/com.termux/files/usr ]; then
-    PLATFORM="termux"
-elif [ "$(uname -s)" = "Linux" ]; then
-    if grep -qi microsoft /proc/version 2>/dev/null || [[ "$(uname -r)" == *microsoft* ]]; then
-        PLATFORM="wsl"
-    else
-        PLATFORM="linux"
-    fi
-elif [ "$(uname -s)" = "Darwin" ]; then
-    PLATFORM="macos"
-else
-    PLATFORM="unknown"
-fi
+on_error() {
+    local line_number=$1
+    print_error "Error in step '${CURRENT_STEP}' at line ${line_number}."
+    exit 1
+}
+
+trap 'on_error $LINENO' ERR
+
+command_exists() {
+    command -v "$1" >/dev/null 2>&1
+}
+
+is_termux() {
+    [ -n "${TERMUX_VERSION-}" ] \
+        || command_exists termux-info \
+        || [ "${PREFIX-}" = "/data/data/com.termux/files/usr" ] \
+        || [[ "${PATH-}" == *"/data/data/com.termux/files/usr/bin"* ]]
+}
+
+is_wsl() {
+    [ -n "${WSL_INTEROP-}" ] || grep -qi microsoft /proc/version 2>/dev/null
+}
+
+is_macos() {
+    [ "$(uname -s)" = "Darwin" ]
+}
 
 print_banner() {
     echo -e "${CYAN}"
@@ -49,143 +62,315 @@ print_banner() {
     echo "║                                                              ║"
     echo "╚══════════════════════════════════════════════════════════════╝"
     echo -e "${NC}"
-    echo -e "${YELLOW}Platform: ${PLATFORM^^} | Directory: $(pwd)${NC}"
+}
+
+detect_env() {
+    local has_pkg="false"
+    local has_apt="false"
+
+    if command_exists pkg; then
+        has_pkg="true"
+    fi
+    if command_exists apt-get; then
+        has_apt="true"
+    fi
+
+    if is_macos; then
+        ENVIRONMENT="MACOS/BREW"
+    elif is_termux; then
+        ENVIRONMENT="TERMUX"
+    elif [ "$has_apt" = "true" ]; then
+        ENVIRONMENT="DEBIAN/APT"
+    else
+        ENVIRONMENT="UNKNOWN"
+    fi
+
+    WSL="false"
+    if is_wsl; then
+        WSL="true"
+    fi
+
+    print_info "Detected: ${ENVIRONMENT}"
+    if [ "$WSL" = "true" ]; then
+        print_info "Environment detail: WSL"
+    fi
+}
+
+require_command() {
+    local cmd="$1"
+    local message="$2"
+    if ! command_exists "$cmd"; then
+        print_error "$message"
+        exit 1
+    fi
+}
+
+get_sudo_cmd() {
+    if [ "$(id -u)" -eq 0 ]; then
+        echo ""
+        return
+    fi
+
+    if command_exists sudo; then
+        echo "sudo"
+        return
+    fi
+
+    print_warning "sudo not found and not running as root; package installs may fail."
     echo ""
 }
 
-print_banner
+update_system() {
+    CURRENT_STEP="update_system"
+    print_step "Updating system packages..."
 
-print_step "Checking Python..."
-if command -v python3 &> /dev/null; then
-    PYTHON_BIN="python3"
-elif command -v python &> /dev/null; then
-    PYTHON_BIN="python"
-else
-    case $PLATFORM in
-        termux)
-            print_info "Installing Python3 in Termux..."
-            pkg update -y && pkg upgrade -y
-            pkg install -y python3
-            PYTHON_BIN="python3"
+    case "$ENVIRONMENT" in
+        TERMUX)
+            pkg update -y
+            pkg upgrade -y
+            ;;
+        DEBIAN/APT)
+            local sudo_cmd
+            sudo_cmd="$(get_sudo_cmd)"
+            ${sudo_cmd} apt-get update -y
+            ${sudo_cmd} apt-get upgrade -y
+            ;;
+        MACOS/BREW)
+            require_command brew "Homebrew not found. Install it from https://brew.sh and re-run."
+            brew update
             ;;
         *)
-            print_error "Python3 not found!"
+            print_error "Unsupported environment. Exiting."
             exit 1
             ;;
     esac
-fi
-print_success "Python found"
 
-print_step "Installing system dependencies..."
-run_optional() {
-    if command -v timeout &> /dev/null; then
-        if ! timeout 30 "$@"; then
-            print_warning "Command failed (continuing): $*"
-            return 0
-        fi
+    print_success "System update complete"
+}
+
+install_system_deps() {
+    CURRENT_STEP="install_system_deps"
+    print_step "Installing system dependencies..."
+
+    case "$ENVIRONMENT" in
+        TERMUX)
+            pkg install -y python git openssl libffi
+            ;;
+        DEBIAN/APT)
+            local sudo_cmd
+            sudo_cmd="$(get_sudo_cmd)"
+            ${sudo_cmd} apt-get install -y python3 python3-venv python3-pip git sqlite3
+            ;;
+        MACOS/BREW)
+            require_command brew "Homebrew not found. Install it from https://brew.sh and re-run."
+            brew install python git sqlite
+            ;;
+        *)
+            print_error "Unsupported environment. Exiting."
+            exit 1
+            ;;
+    esac
+
+    print_success "System dependencies installed"
+}
+
+select_python() {
+    if command_exists python3; then
+        PYTHON_BIN="python3"
+    elif command_exists python; then
+        PYTHON_BIN="python"
     else
-        if ! "$@"; then
-            print_warning "Command failed (continuing): $*"
-            return 0
-        fi
+        print_error "Python is not installed."
+        exit 1
     fi
 }
 
-case $PLATFORM in
-    termux)
-        run_optional pkg update -y
-        run_optional pkg upgrade -y
-        run_optional pkg install -y python3 sqlite git
-        ;;
-    linux|wsl)
-        SUDO_CMD=""
-        if command -v sudo &> /dev/null; then
-            SUDO_CMD="sudo"
-        fi
+ensure_python_version() {
+    local python_cmd="$1"
 
-        if command -v apt-get &> /dev/null; then
-            run_optional $SUDO_CMD apt-get update
-            run_optional $SUDO_CMD apt-get install -y python3-pip python3-venv sqlite3 git
-        elif command -v yum &> /dev/null; then
-            run_optional $SUDO_CMD yum install -y python3-pip sqlite git
-        elif command -v dnf &> /dev/null; then
-            run_optional $SUDO_CMD dnf install -y python3-pip sqlite git
-        elif command -v pacman &> /dev/null; then
-            run_optional $SUDO_CMD pacman -S --noconfirm python-pip sqlite git
-        else
-            print_warning "No supported package manager found; skipping system dependency install"
-        fi
-        ;;
-    macos)
-        if command -v brew &> /dev/null; then
-            run_optional brew install python3 sqlite3 git
-        else
-            print_warning "Homebrew not found; skipping system dependency install"
-        fi
-        ;;
-    *)
-        print_warning "Unknown platform; skipping system dependency install"
-        ;;
-esac
-print_success "System dependency step completed"
+    local version_check
+    version_check=$($python_cmd - <<'PY'
+import sys
+print(f"{sys.version_info.major}.{sys.version_info.minor}")
+PY
+)
 
-print_step "Installing Python requirements..."
-if [ ! -f "requirements.txt" ]; then
-    print_error "requirements.txt not found!"
-    exit 1
-fi
+    local major=${version_check%%.*}
+    local minor=${version_check##*.}
 
-VENV_DIR=".venv"
-VENV_PYTHON="$PYTHON_BIN"
-
-if [ "$PLATFORM" != "termux" ]; then
-    if [ ! -d "$VENV_DIR" ]; then
-        print_info "Creating virtual environment..."
-        run_optional "$PYTHON_BIN" -m venv "$VENV_DIR"
-    fi
-    if [ -x "$VENV_DIR/bin/python" ]; then
-        VENV_PYTHON="$VENV_DIR/bin/python"
-    else
-        print_error "Virtual environment creation failed"
+    if [ "$major" -lt 3 ] || { [ "$major" -eq 3 ] && [ "$minor" -lt 9 ]; }; then
+        print_error "Python 3.9+ is required. Detected ${version_check}."
         exit 1
     fi
-fi
+}
 
-run_optional "$VENV_PYTHON" -m pip install --upgrade pip
+setup_python_env() {
+    CURRENT_STEP="setup_python_env"
+    print_step "Setting up Python environment..."
 
-if [ "$PLATFORM" = "termux" ]; then
-    print_info "Installing packages individually for Termux..."
-    run_optional "$VENV_PYTHON" -m pip install aiogram python-dotenv pydantic pydantic-settings cachetools openai cryptography
-else
-    run_optional "$VENV_PYTHON" -m pip install -r requirements.txt
-fi
-print_success "Python requirements installed"
+    select_python
+    ensure_python_version "$PYTHON_BIN"
 
-print_step "Setting up environment..."
-if [ ! -f ".env" ]; then
-    if [ -f ".env.example" ]; then
-        cp .env.example .env
-        print_success "Created .env from template"
-        print_info "Edit .env with BOT_TOKEN and OPENAI_API_KEY"
+    VENV_DIR=".venv"
+    VENV_PYTHON="$PYTHON_BIN"
+    USE_VENV="false"
+
+    if [ "$ENVIRONMENT" = "TERMUX" ]; then
+        if [ -d "$VENV_DIR" ]; then
+            if [ -x "$VENV_DIR/bin/python" ]; then
+                USE_VENV="true"
+                VENV_PYTHON="$VENV_DIR/bin/python"
+            else
+                print_warning "Existing virtual environment is invalid; removing."
+                rm -rf "$VENV_DIR"
+            fi
+        fi
+
+        if [ "$USE_VENV" = "false" ]; then
+            if "$PYTHON_BIN" -m venv "$VENV_DIR" >/dev/null 2>&1; then
+                if [ -x "$VENV_DIR/bin/python" ]; then
+                    USE_VENV="true"
+                    VENV_PYTHON="$VENV_DIR/bin/python"
+                    print_info "Virtual environment created in Termux."
+                else
+                    rm -rf "$VENV_DIR"
+                fi
+            else
+                rm -rf "$VENV_DIR"
+                print_warning "Termux venv unavailable; falling back to user installs."
+            fi
+        fi
     else
-        print_error ".env.example not found!"
+        if [ ! -d "$VENV_DIR" ]; then
+            "$PYTHON_BIN" -m venv "$VENV_DIR"
+        fi
+        if [ -x "$VENV_DIR/bin/python" ]; then
+            USE_VENV="true"
+            VENV_PYTHON="$VENV_DIR/bin/python"
+        else
+            print_error "Virtual environment creation failed."
+            exit 1
+        fi
+    fi
+
+    print_success "Python environment ready"
+}
+
+requirements_hash() {
+    if command_exists sha256sum; then
+        sha256sum requirements.txt | awk '{print $1}'
+    elif command_exists shasum; then
+        shasum -a 256 requirements.txt | awk '{print $1}'
+    else
+        echo ""
+    fi
+}
+
+install_python_deps() {
+    CURRENT_STEP="install_python_deps"
+    print_step "Installing Python requirements..."
+
+    if [ ! -f "requirements.txt" ]; then
+        print_error "requirements.txt not found."
         exit 1
     fi
-else
-    print_info ".env already exists; leaving as-is"
-fi
 
-if [ -f "run_resolver.sh" ]; then
-    chmod +x run_resolver.sh
-    print_success "Run script is ready"
-else
-    print_error "run_resolver.sh not found!"
-    exit 1
-fi
+    local pip_cmd
+    if [ "$USE_VENV" = "true" ]; then
+        "$VENV_PYTHON" -m pip install -U pip
+        pip_cmd=("$VENV_PYTHON" -m pip install -r requirements.txt)
+    else
+        pip_cmd=("$PYTHON_BIN" -m pip install --user -r requirements.txt)
+    fi
 
-print_success "INSTALLATION COMPLETE"
+    local marker_file=".requirements.hash"
+    local current_hash
+    current_hash="$(requirements_hash)"
 
-echo ""
-echo "Next steps:"
-echo "1) Edit .env with your BOT_TOKEN"
-echo "2) Start the bot: ./run_resolver.sh"
+    if [ -n "$current_hash" ] && [ -f "$marker_file" ]; then
+        local previous_hash
+        previous_hash="$(cat "$marker_file")"
+        if [ "$current_hash" = "$previous_hash" ]; then
+            print_info "Python requirements unchanged; skipping install."
+            print_success "Python requirements ready"
+            return
+        fi
+    fi
+
+    "${pip_cmd[@]}"
+
+    if [ -n "$current_hash" ]; then
+        echo "$current_hash" > "$marker_file"
+    fi
+
+    print_success "Python requirements installed"
+}
+
+setup_project_files() {
+    CURRENT_STEP="setup_project_files"
+    print_step "Setting up project files..."
+
+    if [ ! -f ".env" ]; then
+        if [ -f ".env.example" ]; then
+            cp .env.example .env
+            print_success "Created .env from template"
+            print_info "Edit .env with BOT_TOKEN and optional OPENAI_API_KEY"
+        else
+            print_error ".env.example not found."
+            exit 1
+        fi
+    else
+        print_info ".env already exists; leaving as-is"
+    fi
+
+    mkdir -p data logs
+
+    chmod +x install_resolver.sh
+
+    if [ -f "run_resolver.sh" ]; then
+        chmod +x run_resolver.sh
+        RUN_SCRIPT="./run_resolver.sh"
+    elif [ -f "run.sh" ]; then
+        chmod +x run.sh
+        RUN_SCRIPT="./run.sh"
+    else
+        print_error "No run script found (run_resolver.sh or run.sh)."
+        exit 1
+    fi
+
+    print_success "Project files ready"
+}
+
+verify_install() {
+    CURRENT_STEP="verify_install"
+    print_step "Verifying installation..."
+
+    "$VENV_PYTHON" -m compileall app
+    "$VENV_PYTHON" - <<'PY'
+from app.config import settings
+from app.db import DB
+print(DB(settings.db_path).health_check())
+PY
+
+    print_success "Verification complete"
+}
+
+main() {
+    print_banner
+    detect_env
+
+    update_system
+    install_system_deps
+    setup_python_env
+    install_python_deps
+    setup_project_files
+    verify_install
+
+    print_success "INSTALLATION COMPLETE"
+    echo ""
+    echo "Next steps:"
+    echo "1) Edit .env with your BOT_TOKEN"
+    echo "2) Start the bot: ${RUN_SCRIPT}"
+}
+
+main "$@"
