@@ -68,6 +68,7 @@ SELF_HARM_TAUNTS = {"kys", "kill yourself", "end yourself", "go die"}
 FLOOD_LIMIT = 5
 FLOOD_WINDOW_SECONDS = 10
 _flood_tracker = defaultdict(lambda: deque(maxlen=FLOOD_LIMIT * 2))
+_group_entitlement_notice_ts: dict[int, int] = {}
 
 GROUP_TEMPLATES = {
     "deescalate": "Let’s keep this respectful and calm so everyone feels safe to talk.",
@@ -135,6 +136,15 @@ async def _edit_or_send(message: Message, text: str, reply_markup=None) -> None:
         await message.answer(text, reply_markup=reply_markup)
 
 
+async def _edit_message(message: Message, text: str, reply_markup=None) -> None:
+    try:
+        await message.edit_text(text, reply_markup=reply_markup)
+    except TelegramBadRequest as exc:
+        if "message is not modified" in str(exc).lower():
+            return
+        logger.warning("Failed to edit message: %s", exc)
+
+
 def _fallback_notice() -> str:
     return (
         "\n\n⚠️ <b>AI mode is disabled.</b> "
@@ -147,7 +157,7 @@ def _maybe_add_fallback(text: str) -> str:
     return text + _fallback_notice() if not settings.use_llm else text
 
 
-async def _is_admin(bot: Bot, chat_id: int, user_id: int) -> bool:
+async def is_group_admin(bot: Bot, chat_id: int, user_id: int) -> bool:
     try:
         member = await bot.get_chat_member(chat_id, user_id)
         return member.status in {"administrator", "creator"}
@@ -209,6 +219,29 @@ def detect_flood(group_id: int, user_id: int, ts: int) -> bool:
     return len(window) > FLOOD_LIMIT
 
 
+def require_group_entitlement(db: DB, group_id: int) -> bool:
+    try:
+        return db.group_subscription_active(group_id)
+    except Exception as exc:
+        logger.error("Group entitlement check failed for %s: %s", group_id, exc)
+        return False
+
+
+async def _maybe_notify_group_entitlement(bot: Bot, group_id: int) -> None:
+    now = int(time.time())
+    last_notice = _group_entitlement_notice_ts.get(group_id, 0)
+    if now - last_notice < 3600:
+        return
+    try:
+        await bot.send_message(
+            chat_id=group_id,
+            text="⚠️ Admins: group moderation is disabled until a subscription is active.",
+        )
+        _group_entitlement_notice_ts[group_id] = now
+    except Exception as exc:
+        logger.warning("Failed to notify group %s about subscription status: %s", group_id, exc)
+
+
 def _format_expiry(end_ts: Optional[int]) -> str:
     if not end_ts:
         return "Never"
@@ -251,46 +284,46 @@ def _group_plan_button_text(plan_id: str, fallback: str) -> str:
 def kb_groupadmin(group: dict, subscription_info: dict, feature_enabled: bool):
     b = InlineKeyboardBuilder()
     if not feature_enabled:
-        b.button(text=f"{EMOJIS['back']} Close", callback_data="group:menu:close")
+        b.button(text=f"{EMOJIS['back']} Close", callback_data="ga:menu:close")
         b.adjust(1)
         return b.as_markup()
 
     enabled = bool(group.get("enabled"))
     b.button(
         text="✅ Enable" if not enabled else "🚫 Disable",
-        callback_data="group:toggle_enabled",
+        callback_data="ga:toggle_enabled",
     )
-    b.button(text="🌐 Language", callback_data="group:menu:language")
-    b.button(text="🧭 Mode", callback_data="group:menu:mode")
-    b.button(text=f"Warn threshold ({group.get('warn_threshold')})", callback_data="group:menu:warn")
-    b.button(text=f"Mute threshold ({group.get('mute_threshold')})", callback_data="group:menu:mute")
+    b.button(text="🌐 Language", callback_data="ga:menu:language")
+    b.button(text="🧭 Mode", callback_data="ga:menu:mode")
+    b.button(text=f"Warn threshold ({group.get('warn_threshold')})", callback_data="ga:menu:warn")
+    b.button(text=f"Mute threshold ({group.get('mute_threshold')})", callback_data="ga:menu:mute")
     b.button(
         text=f"Welcome {'On' if group.get('welcome_enabled') else 'Off'}",
-        callback_data="group:toggle:welcome_enabled",
+        callback_data="ga:toggle:welcome_enabled",
     )
     b.button(
         text=f"Rules {'On' if group.get('rules_enabled') else 'Off'}",
-        callback_data="group:toggle:rules_enabled",
+        callback_data="ga:toggle:rules_enabled",
     )
     b.button(
         text=f"Security {'On' if group.get('security_enabled') else 'Off'}",
-        callback_data="group:toggle:security_enabled",
+        callback_data="ga:toggle:security_enabled",
     )
 
     if not subscription_info.get("active"):
         b.button(
             text=_group_plan_button_text("group_monthly", "⭐ Buy Monthly"),
-            callback_data="group:buy:group_monthly",
+            callback_data="ga:buy:group_monthly",
         )
         b.button(
             text=_group_plan_button_text("group_yearly", "⭐ Buy Yearly"),
-            callback_data="group:buy:group_yearly",
+            callback_data="ga:buy:group_yearly",
         )
         b.button(
             text=_group_plan_button_text("group_lifetime", "⭐ Buy Lifetime"),
-            callback_data="group:buy:group_lifetime",
+            callback_data="ga:buy:group_lifetime",
         )
-    b.button(text=f"{EMOJIS['back']} Close", callback_data="group:menu:close")
+    b.button(text=f"{EMOJIS['back']} Close", callback_data="ga:menu:close")
     b.adjust(2, 2, 2, 2, 2, 1)
     return b.as_markup()
 
@@ -299,8 +332,8 @@ def kb_group_language_menu():
     b = InlineKeyboardBuilder()
     for code in SUPPORTED_LANGUAGES:
         label = LANGUAGE_LABELS.get(code, code)
-        b.button(text=f"{label} ({code})", callback_data=f"group:lang:{code}")
-    b.button(text=f"{EMOJIS['back']} Back", callback_data="group:menu:main")
+        b.button(text=f"{label} ({code})", callback_data=f"ga:lang:{code}")
+    b.button(text=f"{EMOJIS['back']} Back", callback_data="ga:menu:main")
     b.adjust(2)
     return b.as_markup()
 
@@ -309,8 +342,8 @@ def kb_group_mode_menu():
     b = InlineKeyboardBuilder()
     for mode in LANGUAGE_MODES:
         label = LANGUAGE_MODE_LABELS.get(mode, mode.title())
-        b.button(text=f"{label}", callback_data=f"group:mode:{mode}")
-    b.button(text=f"{EMOJIS['back']} Back", callback_data="group:menu:main")
+        b.button(text=f"{label}", callback_data=f"ga:mode:{mode}")
+    b.button(text=f"{EMOJIS['back']} Back", callback_data="ga:menu:main")
     b.adjust(1)
     return b.as_markup()
 
@@ -322,8 +355,8 @@ def kb_group_threshold_menu(threshold_type: str):
     else:
         options = range(2, 7)
     for value in options:
-        b.button(text=str(value), callback_data=f"group:{threshold_type}:{value}")
-    b.button(text=f"{EMOJIS['back']} Back", callback_data="group:menu:main")
+        b.button(text=str(value), callback_data=f"ga:{threshold_type}:{value}")
+    b.button(text=f"{EMOJIS['back']} Back", callback_data="ga:menu:main")
     b.adjust(3, 3, 1)
     return b.as_markup()
 
@@ -889,11 +922,11 @@ async def cmd_groupadmin(msg: Message, bot: Bot, db: DB):
     if msg.chat.type not in {"group", "supergroup"}:
         await msg.answer("This command can only be used in groups.")
         return
-    if not await _is_admin(bot, msg.chat.id, msg.from_user.id):
+    if not await is_group_admin(bot, msg.chat.id, msg.from_user.id):
         await msg.answer("This command is restricted to group admins.")
         return
 
-    group = db.get_group(msg.chat.id)
+    group = db.get_group_settings(msg.chat.id)
     subscription_info = db.get_group_subscription_info(msg.chat.id)
     text = render_groupadmin_text(group, subscription_info, settings.feature_v2_groups)
     await msg.answer(
@@ -907,7 +940,7 @@ async def cmd_grouplogs(msg: Message, bot: Bot, db: DB):
     if msg.chat.type not in {"group", "supergroup"}:
         await msg.answer("This command can only be used in groups.")
         return
-    if not await _is_admin(bot, msg.chat.id, msg.from_user.id):
+    if not await is_group_admin(bot, msg.chat.id, msg.from_user.id):
         await msg.answer("This command is restricted to group admins.")
         return
     if not settings.feature_v2_groups:
@@ -929,7 +962,7 @@ async def cmd_grouplogs(msg: Message, bot: Bot, db: DB):
     await msg.answer("\n".join(lines))
 
 
-@router.callback_query(F.data.startswith("group:"))
+@router.callback_query(F.data.startswith("ga:"))
 async def groupadmin_handler(cb: CallbackQuery, bot: Bot, db: DB):
     if not cb.message:
         await cb.answer()
@@ -939,13 +972,14 @@ async def groupadmin_handler(cb: CallbackQuery, bot: Bot, db: DB):
         await cb.answer("Group-only command.")
         return
 
-    if not await _is_admin(bot, cb.message.chat.id, cb.from_user.id):
-        await cb.answer("Admins only.")
+    if not await is_group_admin(bot, cb.message.chat.id, cb.from_user.id):
+        await cb.answer("This command is restricted to group admins.")
         return
 
     group_id = cb.message.chat.id
-    if not settings.feature_v2_groups and cb.data not in {"group:menu:close"}:
-        await _edit_or_send(
+    group = db.get_group_settings(group_id)
+    if not settings.feature_v2_groups and cb.data not in {"ga:menu:close"}:
+        await _edit_message(
             cb.message,
             render_groupadmin_text({}, {}, False),
             reply_markup=kb_groupadmin({}, {}, False),
@@ -956,13 +990,12 @@ async def groupadmin_handler(cb: CallbackQuery, bot: Bot, db: DB):
     action = cb.data.split(":", 1)[1]
 
     if action == "menu:close":
-        await _edit_or_send(cb.message, "Admin panel closed.")
+        await _edit_message(cb.message, "Admin panel closed.")
         await cb.answer()
         return
     if action == "menu:main":
-        group = db.get_group(group_id)
         subscription_info = db.get_group_subscription_info(group_id)
-        await _edit_or_send(
+        await _edit_message(
             cb.message,
             render_groupadmin_text(group, subscription_info, settings.feature_v2_groups),
             reply_markup=kb_groupadmin(group, subscription_info, settings.feature_v2_groups),
@@ -970,15 +1003,15 @@ async def groupadmin_handler(cb: CallbackQuery, bot: Bot, db: DB):
         await cb.answer()
         return
     if action == "menu:language":
-        await _edit_or_send(cb.message, "Choose group language:", reply_markup=kb_group_language_menu())
+        await _edit_message(cb.message, "Choose group language:", reply_markup=kb_group_language_menu())
         await cb.answer()
         return
     if action == "menu:mode":
-        await _edit_or_send(cb.message, "Choose group language mode:", reply_markup=kb_group_mode_menu())
+        await _edit_message(cb.message, "Choose group language mode:", reply_markup=kb_group_mode_menu())
         await cb.answer()
         return
     if action == "menu:warn":
-        await _edit_or_send(
+        await _edit_message(
             cb.message,
             "Set warning threshold:",
             reply_markup=kb_group_threshold_menu("warn"),
@@ -986,7 +1019,7 @@ async def groupadmin_handler(cb: CallbackQuery, bot: Bot, db: DB):
         await cb.answer()
         return
     if action == "menu:mute":
-        await _edit_or_send(
+        await _edit_message(
             cb.message,
             "Set mute threshold:",
             reply_markup=kb_group_threshold_menu("mute"),
@@ -994,11 +1027,9 @@ async def groupadmin_handler(cb: CallbackQuery, bot: Bot, db: DB):
         await cb.answer()
         return
     if action == "toggle_enabled":
-        group = db.get_group(group_id)
         db.set_group_enabled(group_id, not bool(group.get("enabled")))
     elif action.startswith("toggle:"):
         field = action.split(":", 1)[1]
-        group = db.get_group(group_id)
         current = bool(group.get(field))
         db.set_group_toggle(group_id, field, not current)
     elif action.startswith("lang:"):
@@ -1019,7 +1050,6 @@ async def groupadmin_handler(cb: CallbackQuery, bot: Bot, db: DB):
         except ValueError:
             await cb.answer("Invalid value.")
             return
-        group = db.get_group(group_id)
         mute_threshold = group.get("mute_threshold", 3)
         if value >= mute_threshold:
             await cb.answer("Warn threshold must be less than mute threshold.")
@@ -1031,7 +1061,6 @@ async def groupadmin_handler(cb: CallbackQuery, bot: Bot, db: DB):
         except ValueError:
             await cb.answer("Invalid value.")
             return
-        group = db.get_group(group_id)
         warn_threshold = group.get("warn_threshold", 2)
         if value <= warn_threshold:
             await cb.answer("Mute threshold must be greater than warn threshold.")
@@ -1081,7 +1110,7 @@ async def groupadmin_handler(cb: CallbackQuery, bot: Bot, db: DB):
                 disable_notification=True,
                 protect_content=False,
             )
-            await cb.message.answer("I sent you the Stars invoice in your DM.")
+            await cb.answer("I sent you the Stars invoice in your DM.")
         except Exception as exc:
             logger.error("Failed to send group invoice: %s", exc)
             await cb.answer("Failed to create invoice. Please try again.")
@@ -1090,9 +1119,9 @@ async def groupadmin_handler(cb: CallbackQuery, bot: Bot, db: DB):
         await cb.answer("Unknown action.")
         return
 
-    group = db.get_group(group_id)
+    group = db.get_group_settings(group_id)
     subscription_info = db.get_group_subscription_info(group_id)
-    await _edit_or_send(
+    await _edit_message(
         cb.message,
         render_groupadmin_text(group, subscription_info, settings.feature_v2_groups),
         reply_markup=kb_groupadmin(group, subscription_info, settings.feature_v2_groups),
@@ -1238,13 +1267,14 @@ async def group_moderation_handler(msg: Message, bot: Bot, db: DB):
         return
 
     group_id = msg.chat.id
-    group = db.get_group(group_id)
+    group = db.get_group_settings(group_id)
     if not group.get("enabled"):
         return
-    if not db.group_subscription_active(group_id):
+    if not require_group_entitlement(db, group_id):
+        await _maybe_notify_group_entitlement(bot, group_id)
         return
 
-    if await _is_admin(bot, group_id, msg.from_user.id):
+    if await is_group_admin(bot, group_id, msg.from_user.id):
         return
 
     ts = int(msg.date.timestamp()) if msg.date else int(time.time())
@@ -1316,6 +1346,7 @@ async def group_moderation_handler(msg: Message, bot: Bot, db: DB):
             "language": language,
             "language_mode": language_mode,
             "flood": flood_trigger,
+            "ai_summary": deescalation[:500],
         }
     )
     db.record_moderation_log(

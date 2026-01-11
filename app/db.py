@@ -225,6 +225,15 @@ class DB:
                 conn.execute(f"ALTER TABLE groups ADD COLUMN {column} {column_type}")
                 logger.info("Added missing column to groups: %s", column)
 
+        conn.execute("UPDATE groups SET enabled = 0 WHERE enabled IS NULL")
+        conn.execute("UPDATE groups SET language = 'en' WHERE language IS NULL")
+        conn.execute("UPDATE groups SET language_mode = 'clean' WHERE language_mode IS NULL")
+        conn.execute("UPDATE groups SET warn_threshold = 2 WHERE warn_threshold IS NULL")
+        conn.execute("UPDATE groups SET mute_threshold = 3 WHERE mute_threshold IS NULL")
+        conn.execute("UPDATE groups SET welcome_enabled = 0 WHERE welcome_enabled IS NULL")
+        conn.execute("UPDATE groups SET rules_enabled = 0 WHERE rules_enabled IS NULL")
+        conn.execute("UPDATE groups SET security_enabled = 0 WHERE security_enabled IS NULL")
+
     @contextmanager
     def _conn(self):
         """Context manager for database connections with Termux optimizations"""
@@ -402,6 +411,24 @@ class DB:
             )
             row = cursor.fetchone()
             return dict(row) if row else {}
+
+    def get_group_settings(self, group_id: int) -> Dict[str, Any]:
+        """Get group settings with defaults applied."""
+        defaults = {
+            "enabled": 0,
+            "language": "en",
+            "language_mode": "clean",
+            "warn_threshold": 2,
+            "mute_threshold": 3,
+            "welcome_enabled": 0,
+            "rules_enabled": 0,
+            "security_enabled": 0,
+        }
+        group = self.get_group(group_id)
+        for key, value in defaults.items():
+            if group.get(key) is None:
+                group[key] = value
+        return group
 
     def set_group_enabled(self, group_id: int, enabled: bool) -> None:
         with self._conn() as conn:
